@@ -1,0 +1,220 @@
+/* Squeeze Street — base.css
+ * Layout: one full-bleed living scene (canvas) with chunky sticker-style UI floating on top.
+ * This file owns tokens, the page frame and the shared components.
+ * ui.css and screens.css build on it and must not redefine anything here.
+ * Single deliberate look (a sunny cartoon world), so there is no light/dark split.
+ */
+:root {
+  /* colour */
+  --ink: #1b1f3b;            /* outlines and text */
+  --ink-soft: #5a5f85;       /* secondary text */
+  --ink-faint: #c9cde6;      /* hairlines, disabled */
+  --paper: #ffffff;
+  --paper-2: #f1f4ff;        /* cool tint for wells */
+  --lemon: #ffd83d;
+  --lemon-deep: #f2ae00;
+  --lemon-pale: #fff4b8;
+  --leaf: #35c977;
+  --leaf-deep: #1c9655;
+  --coral: #ff6257;
+  --coral-deep: #d83a30;
+  --berry: #ff5d8f;
+  --sky: #4cc3f0;
+  --sky-deep: #2487d1;
+  --grape: #7a5cff;
+  --night: #131a3a;          /* page ground behind the canvas */
+  --good: var(--leaf-deep);
+  --bad: var(--coral-deep);
+
+  /* type */
+  --font-display: 'Bagel Fat One', 'Arial Rounded MT Bold', 'Trebuchet MS', system-ui, sans-serif;
+  --font-body: 'Figtree', ui-rounded, 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --fs-xs: 0.75rem;
+  --fs-sm: 0.875rem;
+  --fs-md: 1rem;
+  --fs-lg: 1.25rem;
+  --fs-xl: 1.625rem;
+  --fs-2xl: 2.25rem;
+  --fs-3xl: 3.25rem;
+
+  /* shape */
+  --line: 3px;
+  --r-sm: 10px;
+  --r-md: 16px;
+  --r-lg: 24px;
+  --drop: 0 4px 0 var(--ink);
+  --drop-lg: 0 7px 0 var(--ink);
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px;
+
+  --hud-h: 60px;
+  --gutter-l: max(16px, env(safe-area-inset-left, 0px));
+  --gutter-r: max(16px, env(safe-area-inset-right, 0px));
+  --spring: cubic-bezier(.34, 1.56, .64, 1);
+  --swift: cubic-bezier(.2, .8, .2, 1);
+
+  color-scheme: light;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--night);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.35;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+button, input { font: inherit; color: inherit; }
+button { cursor: pointer; }
+
+/* ---------- frame ---------- */
+#game { position: relative; height: 100%; overflow: hidden; user-select: none; -webkit-user-select: none; touch-action: manipulation; background: var(--night); }
+#scene, #fx { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+#fx { z-index: 30; pointer-events: none; }
+#ui { position: absolute; inset: 0; z-index: 10; pointer-events: none; }
+#ui > * { pointer-events: auto; }
+#ui > #banner-root, #ui > #toast-root, #ui > #coach-root, #ui > #modal-root { pointer-events: none; }
+#banner-root > *, #toast-root > *, #coach-root > *, #modal-root > * { pointer-events: auto; }
+
+#hud { position: absolute; top: 10px; left: var(--gutter-l); right: var(--gutter-r); min-height: var(--hud-h); z-index: 5; }
+#banner-root { position: absolute; top: calc(var(--hud-h) + 22px); left: var(--gutter-l); right: var(--gutter-r); display: flex; flex-direction: column; align-items: center; gap: var(--s2); z-index: 6; }
+#daybar { position: absolute; left: var(--gutter-l); right: var(--gutter-r); bottom: max(12px, env(safe-area-inset-bottom, 0px)); z-index: 5; }
+#title { position: absolute; inset: 0; z-index: 8; padding-left: var(--gutter-l); padding-right: var(--gutter-r); }
+#modal-root { position: absolute; inset: 0; z-index: 20; }
+#toast-root { position: absolute; left: var(--gutter-l); right: var(--gutter-r); bottom: max(96px, env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column-reverse; align-items: center; gap: var(--s2); z-index: 25; }
+#coach-root { position: absolute; inset: 0; z-index: 22; }
+
+/* The phase panel. Narrow screens: bottom sheet. Wide screens: docked on the right.
+   data-mode="center" is a centred card (results). Put scrolling content in .sheet-body
+   and an always-visible action row in .sheet-foot. */
+#sheet {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 4;
+  max-height: 64%;
+  display: flex; flex-direction: column;
+  background: var(--paper);
+  border: var(--line) solid var(--ink); border-bottom: 0;
+  border-radius: var(--r-lg) var(--r-lg) 0 0;
+  box-shadow: 0 -6px 0 rgba(19, 26, 58, .18);
+  overflow: hidden;
+}
+#sheet[data-mode="center"] {
+  top: calc(var(--hud-h) + 22px); bottom: 12px; max-height: none;
+  left: var(--gutter-l); right: var(--gutter-r);
+  width: auto; max-width: 780px; margin-inline: auto;
+  border-bottom: var(--line) solid var(--ink); border-radius: var(--r-lg);
+  box-shadow: var(--drop-lg);
+}
+.sheet-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: var(--s4); padding-left: var(--gutter-l); padding-right: var(--gutter-r); }
+.sheet-foot { flex: 0 0 auto; padding: var(--s3) var(--gutter-r) max(var(--s3), env(safe-area-inset-bottom, 0px)) var(--gutter-l); border-top: var(--line) solid var(--ink); background: var(--paper-2); display: flex; gap: var(--s3); align-items: center; }
+#sheet[data-mode="center"] .sheet-body, #sheet[data-mode="center"] .sheet-foot { padding-left: var(--s4); padding-right: var(--s4); }
+
+@media (min-width: 900px) and (min-aspect-ratio: 5/4) {
+  #sheet[data-mode="dock"] {
+    top: calc(var(--hud-h) + 22px); bottom: 16px; left: auto; right: var(--gutter-r);
+    width: min(460px, 40%); max-height: none;
+    border-bottom: var(--line) solid var(--ink); border-radius: var(--r-lg);
+    box-shadow: var(--drop-lg);
+  }
+  #sheet[data-mode="dock"] .sheet-body, #sheet[data-mode="dock"] .sheet-foot { padding-left: var(--s4); padding-right: var(--s4); }
+}
+@media (max-width: 520px) { :root { --hud-h: 52px; } }
+
+/* ---------- type ---------- */
+.display { font-family: var(--font-display); font-weight: 400; letter-spacing: .01em; line-height: 1.05; text-wrap: balance; }
+.label { font-size: var(--fs-xs); font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-soft); }
+.num { font-variant-numeric: tabular-nums; font-feature-settings: 'tnum'; }
+.muted { color: var(--ink-soft); }
+.good { color: var(--good); }
+.bad { color: var(--bad); }
+
+/* ---------- icon ---------- */
+.ico { display: inline-flex; width: 1.3em; height: 1.3em; flex: 0 0 auto; vertical-align: -0.28em; }
+.ico svg { width: 100%; height: 100%; display: block; overflow: visible; }
+.ico--lg { width: 2em; height: 2em; }
+.ico--xl { width: 3em; height: 3em; }
+
+/* ---------- button ---------- */
+.btn {
+  --btn-bg: var(--paper);
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--s2);
+  min-height: 44px; padding: 8px 16px;
+  font-weight: 800; font-size: var(--fs-md); line-height: 1.1; text-align: center; white-space: nowrap;
+  background: var(--btn-bg); color: var(--ink);
+  border: var(--line) solid var(--ink); border-radius: var(--r-md);
+  box-shadow: var(--drop);
+  transform: translateY(0);
+  transition: transform .09s var(--swift), box-shadow .09s var(--swift), filter .15s;
+}
+.btn:hover { transform: translateY(-2px); box-shadow: 0 6px 0 var(--ink); filter: brightness(1.04); }
+.btn:active, .btn.is-pressed { transform: translateY(4px); box-shadow: 0 0 0 var(--ink); }
+.btn:focus-visible, .stepper-btn:focus-visible, .range:focus-visible { outline: 3px solid var(--grape); outline-offset: 3px; }
+.btn[disabled], .btn[aria-disabled="true"] { --btn-bg: #e6e8f4; color: #8b8fad; border-color: #8b8fad; box-shadow: 0 4px 0 #8b8fad; cursor: not-allowed; transform: none; filter: none; }
+.btn--primary { --btn-bg: var(--lemon); }
+.btn--go { --btn-bg: var(--leaf); color: #06311a; }
+.btn--danger { --btn-bg: var(--coral); color: #fff; }
+.btn--sky { --btn-bg: var(--sky); }
+.btn--ghost { --btn-bg: transparent; box-shadow: none; border-color: transparent; }
+.btn--ghost:hover { --btn-bg: var(--paper-2); box-shadow: none; transform: none; }
+.btn--sm { min-height: 36px; padding: 5px 12px; font-size: var(--fs-sm); border-radius: var(--r-sm); }
+.btn--lg { min-height: 56px; padding: 12px 24px; font-family: var(--font-display); font-weight: 400; font-size: var(--fs-lg); letter-spacing: .02em; border-radius: 20px; box-shadow: var(--drop-lg); }
+.btn--lg:hover { box-shadow: 0 9px 0 var(--ink); }
+.btn--lg:active { transform: translateY(7px); box-shadow: 0 0 0 var(--ink); }
+.btn--icon { width: 44px; min-width: 44px; padding: 0; }
+.btn--icon.btn--sm { width: 36px; min-width: 36px; }
+.btn--block { display: flex; width: 100%; }
+
+/* ---------- surfaces ---------- */
+.panel { background: var(--paper); border: var(--line) solid var(--ink); border-radius: var(--r-md); box-shadow: var(--drop); }
+.well { background: var(--paper-2); border: 2px solid var(--ink-faint); border-radius: var(--r-md); }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; min-height: 28px; font-size: var(--fs-sm); font-weight: 800; white-space: nowrap; background: var(--paper); border: 2px solid var(--ink); border-radius: 999px; }
+.chip--lemon { background: var(--lemon); }
+.chip--good { background: #c9f5dc; }
+.chip--bad { background: #ffd3cf; }
+.chip--sky { background: #cdeeff; }
+
+/* ---------- stepper (built by SS.stepper) ---------- */
+.stepper { display: inline-flex; align-items: center; gap: 6px; }
+.stepper-btn { width: 40px; height: 40px; flex: 0 0 auto; display: grid; place-items: center; padding: 0; font-family: var(--font-display); font-size: 1.4rem; line-height: 1; background: var(--lemon); border: var(--line) solid var(--ink); border-radius: 12px; box-shadow: 0 3px 0 var(--ink); transition: transform .08s var(--swift), box-shadow .08s var(--swift); touch-action: none; }
+.stepper-btn:active { transform: translateY(3px); box-shadow: 0 0 0 var(--ink); }
+.stepper-btn[disabled] { background: #e6e8f4; color: #8b8fad; border-color: #8b8fad; box-shadow: 0 3px 0 #8b8fad; cursor: not-allowed; transform: none; }
+.stepper-val { min-width: 3.2ch; text-align: center; font-weight: 900; font-size: var(--fs-lg); font-variant-numeric: tabular-nums; }
+.stepper-val.bump { animation: ss-bump .22s var(--spring); }
+
+/* ---------- range ---------- */
+.range { -webkit-appearance: none; appearance: none; width: 100%; height: 28px; margin: 0; background: transparent; cursor: pointer; }
+.range::-webkit-slider-runnable-track { height: 12px; background: var(--paper-2); border: var(--line) solid var(--ink); border-radius: 999px; }
+.range::-moz-range-track { height: 6px; background: var(--paper-2); border: var(--line) solid var(--ink); border-radius: 999px; }
+.range::-webkit-slider-thumb { -webkit-appearance: none; width: 28px; height: 28px; margin-top: -11px; background: var(--lemon); border: var(--line) solid var(--ink); border-radius: 50%; box-shadow: 0 3px 0 var(--ink); }
+.range::-moz-range-thumb { width: 22px; height: 22px; background: var(--lemon); border: var(--line) solid var(--ink); border-radius: 50%; box-shadow: 0 3px 0 var(--ink); }
+
+/* ---------- meter: <div class="meter" style="--v:.6"><i></i></div> ---------- */
+.meter { position: relative; height: 14px; background: var(--paper-2); border: 2px solid var(--ink); border-radius: 999px; overflow: hidden; }
+.meter > i { position: absolute; inset: 0; width: calc(var(--v, 0) * 100%); background: var(--meter-fill, var(--leaf)); border-right: 2px solid var(--ink); border-radius: 999px 0 0 999px; transition: width .5s var(--swift); }
+
+/* ---------- stars (built by SS.starsHTML) ---------- */
+.stars { position: relative; display: inline-flex; white-space: nowrap; line-height: 1; vertical-align: middle; }
+.stars-off { display: inline-flex; color: var(--ink-faint); filter: grayscale(1) opacity(.45); }
+.stars-on { position: absolute; left: 0; top: 0; display: inline-flex; overflow: hidden; transition: width .6s var(--swift); }
+.stars .ico { width: 1.15em; height: 1.15em; vertical-align: 0; }
+
+/* ---------- shared motion ---------- */
+@keyframes ss-bump { 0% { transform: scale(1); } 40% { transform: scale(1.28); } 100% { transform: scale(1); } }
+@keyframes ss-pop-in { 0% { opacity: 0; transform: scale(.7); } 60% { opacity: 1; transform: scale(1.06); } 100% { opacity: 1; transform: scale(1); } }
+@keyframes ss-rise { 0% { opacity: 0; transform: translateY(22px); } 100% { opacity: 1; transform: translateY(0); } }
+@keyframes ss-drop { 0% { opacity: 0; transform: translateY(-22px); } 100% { opacity: 1; transform: translateY(0); } }
+@keyframes ss-wiggle { 0%, 100% { transform: rotate(0); } 25% { transform: rotate(-5deg); } 75% { transform: rotate(5deg); } }
+@keyframes ss-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.07); } }
+@keyframes ss-shake { 0%, 100% { transform: translateX(0); } 20% { transform: translateX(-6px); } 40% { transform: translateX(6px); } 60% { transform: translateX(-4px); } 80% { transform: translateX(4px); } }
+@keyframes ss-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+@keyframes ss-spin { to { transform: rotate(360deg); } }
+
+/* Tone everything down when asked. #game gets .reduced from the setting too. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
+}
+#game.reduced *, #game.reduced *::before, #game.reduced *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
