@@ -186,6 +186,17 @@
    *   -- Dex the Dealer --
    *   'dealer:buy'       {id, kind, cost}      kind 'boost' | 'limited'
    *   'boost:on'         {id}                  a boost became active (bought, or carried into the day)
+   * Actors -> everyone (Dex's show; purely visual, the sim never listens)
+   *   'dealer:setup'     {step, i?}            Dex setting up / packing up in the scene, in this order:
+   *       'arrive'  he starts rolling his trunk in from off the right edge (morning prep on a day he visits)
+   *       'park'    he reaches his spot and kicks the wheel brake
+   *       'open'    the trunk lid swings open
+   *       'bottle'  one bottle pops up onto the display, i = 0.. in offer order
+   *       'sign'    the pole shoots up and the DEX'S DEALS sign drops in on its chains
+   *       'ready'   fully set up: tappable, Deals button may show, banners and tips may run
+   *       'leave'   closing time: he packs up and rolls off to the right
+   *       'gone'    off screen
+   *     Reduced motion, or a frame where he is already set up (e.g. loading into phase 'day'), skips straight to 'ready'.
    * UI -> everyone
    *   'pause'            {paused}
    *   'ui:open' / 'ui:close' {name}
@@ -409,7 +420,7 @@
    *   won: false,
    *   regulars: [Regular],                      // at most 12, oldest first
    *   boosts: [boostId],                        // Dex's boosts active for the coming day (prep) or the current day (day); cleared when the day ends
-   *   dealer: null | { day, offers: [ { id, kind, sold } ] },  // Dex's stock for state.day (kind 'boost' | 'limited'); null on day 1
+   *   dealer: null | { day, offers: [ { id, kind, sold } ] },  // Dex's stock for state.day (kind 'boost' | 'limited'); null on day 1 and on days he does not visit
    *   boostCost: 0,                             // what the boosts in state.boosts cost (goes on that day's DayResult)
    *   nextRegular: 1                            // number for the next regular's id ('r' + n)
    * }
@@ -524,7 +535,9 @@
    *   cupsPerPitcher()  brewTime()  serveTime()  rent()
    *   -- regulars --
    *   regularsInfo() -> [ { id, name, kind, seed, streak, best, visits, mult, since, lastDay } ]   best streaks first
-   *   -- Dex the Dealer (open in 'prep' and 'day'; gone in 'results' and on day 1) --
+   *   -- Dex the Dealer: he visits SOME days only (always day 2, then by chance, never more than a few days away; see TUNE in sim.js).
+   *      On a visit day he is open in 'prep' and 'day'; gone in 'results', on day 1 and on days he stays away.
+   *      Whether he comes is fixed by (seed, day): a reload never changes it. --
    *   dealerInfo() -> { present, line, offers: [ { id, kind, name, desc, icon, color, cost, sold, canBuy, reason } ], active: [boostId] }
    *       line = one short thing Dex says today (changes daily). kind 'limited' offers carry the flavor's color.
    *   buyDeal(id) -> { ok, reason }   id is a boost id or a limited flavor id from today's offers
@@ -563,6 +576,9 @@
    * }
    *
    * SS.Actors.hit(sx, sy) -> null | {type:'tip', id} | {type:'dealer'} | {type:'stand'}   // screen-space hit test, in that priority
+   *   ('dealer' only once he has parked: not while he is still rolling in, not while packing up)
+   * SS.Actors.dealerPos() -> null | {x, y, h, tx, ty}   where Dex and his trunk are drawn right now (moves during his entrance/exit)
+   * SS.Actors.dealerReady() -> bool   true once Dex is fully set up today (after 'dealer:setup' 'ready'); false while absent or mid-show
    *
    * SS.FX   (js/fx.js)   listens to the bus by itself. Also:
    *   shake(magPx, seconds)  shakeOffset() -> {x, y}
