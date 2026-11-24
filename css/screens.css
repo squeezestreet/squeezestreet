@@ -517,7 +517,7 @@
 }
 @keyframes prep-deals-room { 0% { max-width: 0; min-width: 0; padding-left: 0; padding-right: 0; margin-left: calc(-1 * var(--s2)); border-width: 0; } 100% { max-width: 7rem; } }
 @keyframes prep-deals-pop { 0% { opacity: 0; transform: translateY(30px) scale(.2) rotate(-25deg); } 40% { opacity: 1; } 100% { opacity: 1; transform: none; } }
-@keyframes prep-deals-ring { 0% { opacity: 1; transform: scale(.8); } 100% { opacity: 0; transform: scale(1.5); } }
+@keyframes prep-deals-ring { 0% { opacity: 1; transform: scale(.85); } 35% { opacity: 1; } 100% { opacity: 0; transform: scale(1.55); } }
 @keyframes prep-deals-spark { 0% { opacity: 0; transform: scale(.25); } 15%, 70% { opacity: 1; } 100% { opacity: 0; transform: scale(1.2) rotate(30deg); } }
 @keyframes prep-deals-fade { 0% { opacity: 0; } }
 /* reduced motion: a plain fade (these beat the global rule that zeroes every animation) */

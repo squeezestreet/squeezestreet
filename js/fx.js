@@ -2,7 +2,7 @@
  * The juice: one pooled particle system plus a short list of "acts" (stamps, rings, flashes,
  * float text, the phase wipe, the fireworks show) drawn on the overlay canvas ABOVE the DOM UI.
  * Listens to the bus by itself. Everything lives in screen pixels; world positions from
- * events convert through SS.view. Nothing runs when there is nothing to draw.
+ * events convert through SS.view. Nothing runs when there is nothing to draw (or while Dex's trunk rolls, for its dust).
  *
  * SS.FX = {
  *   update(dt, view, env)  draw(ctx, view, env)
@@ -320,7 +320,8 @@
     shieldPop: { spr: 'shield', v0: 0, v1: 0, g: -40, l0: 1, l1: 1, s0: 1.35, s1: 1.35, e: 1.12, pop: 1, fo: 0.35, force: 1 },
     ghost: { spr: 'ghost', a: -HALF, sp: 0.3, v0: 26, v1: 36, g: -8, drag: 0.4, l0: 1.7, l1: 1.7, s0: 1, s1: 1, e: 0.75, al: 0.8, fi: 0.15, fo: 0.85, sway: 10, fl: 3, rot: 0.3 },
     soft: { spr: 'puff', v0: 10, v1: 45, g: -24, drag: 2, l0: 0.9, l1: 1.4, s0: 0.45, s1: 0.65, e: 2.3, al: 0.45, fo: 0.9, vr: 0.6, j: 14 },
-    mote: { spr: 'glow', z: 2, a: -HALF, sp: 1.6, v0: 40, v1: 130, g: -70, drag: 1.3, l0: 0.6, l1: 1.05, s0: 0.45, s1: 0.85, e: 0.2, j: 70 }
+    mote: { spr: 'glow', z: 2, a: -HALF, sp: 1.6, v0: 40, v1: 130, g: -70, drag: 1.3, l0: 0.6, l1: 1.05, s0: 0.45, s1: 0.85, e: 0.2, j: 70 },
+    wheel: { spr: 'dust', sp: 0.9, v0: 30, v1: 90, g: -40, drag: 3.2, l0: 0.35, l1: 0.6, s0: 0.16, s1: 0.28, e: 2, al: 0.75, fo: 0.7, vr: 1.5, j: 5 }
   };
 
   /** scale a particle count for reduced motion and for how full the pool is */
@@ -487,7 +488,7 @@
    * Update
    * ------------------------------------------------------------------ */
   function update(dt, view, env) {
-    if (!live && !acts.length && shT <= 0) return;
+    if (!live && !acts.length && shT <= 0 && !dexRoll) return;
     lowMo = !!(env && env.reduced);
     var i, p, a, k, e, u, d;
 
@@ -501,6 +502,7 @@
       }
     }
     if (dt <= 0) { sh.x = sh.y = 0; return; }             // paused: hold everything, but never freeze the scene off-centre
+    if (dexRoll) wheelDust(dt);
 
     for (i = acts.length - 1; i >= 0; i--) {
       a = acts[i]; a.t += dt;
@@ -811,6 +813,19 @@
 
   /* Regulars and Dex the Dealer -------------------------------------- */
   var bglow = {}, lastBoost = -1e9, boostN = 0, D = { x: 0, y: 0 };
+  var dexRoll = false, dexX = NaN, dexDust = 0;           // his trunk is on the move: dust from the wheel on the ground
+  function dexAt() { var d = SS.Actors && SS.Actors.dealerPos ? SS.Actors.dealerPos() : null; return d && num(d.x) && num(d.y) && num(d.tx) ? d : null; }
+  function modalUp() { return typeof document !== 'undefined' && !!document.querySelector('#modal-root > *'); }
+  function wheelDust(dt) {
+    var d = dexAt(), s, mv, x, y;
+    if (!d) { dexRoll = false; return; }
+    mv = d.tx - dexX; dexX = d.tx;
+    if (!(Math.abs(mv) > 0.25) || (dexDust -= dt) > 0) return;
+    dexDust = 0.06 + rnd() * 0.05;
+    s = num(d.h) ? d.h / 120 : 1; x = d.tx - 21 * s; y = d.y - 2 * s;
+    if (covered(x, y) || covered(x + (mv < 0 ? 34 : -34), y - 12)) return;   // drawn over the UI: never where a sheet hides him, nor drifting onto it
+    emit(R.wheel, rnd() < 0.4 ? 2 : 1, x, y, -HALF + (mv < 0 ? 0.75 : -0.75), clamp(Math.abs(mv) / dt / 240, 0.4, 1.4));
+  }
   function boostHex(id) { var b = SS.DATA && SS.DATA.boosts && SS.DATA.byId(SS.DATA.boosts, id); return b && /^#[0-9a-f]{6}$/i.test(b.color) ? b.color : '#ffd83d'; }
   function boostGlow(c) {
     var n;
@@ -906,6 +921,30 @@
     if (!lowMo) ring(x, y, 10, 160 * V.scale, 0.85, hex, 3, d + 0.22);
     if ((o = emit(R.boom, 1, x, y, null, 1, g))) o.delay = d;
     emit(R.mote, 12, x, y + 30 * U, null, 1, g);
+  });
+  // Dex setting up and packing up: dust while the trunk rolls, a stamp of dust at the brake, a puff as the sign lands, a burst at ta-da
+  on('dealer:setup', function (p) {
+    var d = dexAt(), s, x, y, i, o;
+    if (p.step === 'arrive' || p.step === 'leave') { dexRoll = !p.quiet && !lowMo; dexX = d ? d.tx : NaN; dexDust = 0; return; }
+    if (p.step === 'gone' || p.step === 'park' || p.step === 'ready') dexRoll = false;   // 'ready' too: opening mid-roll snaps him in with no 'park'
+    if (!d || p.quiet) return;
+    s = num(d.h) ? d.h / 120 : 1;
+    if (p.step === 'park') {
+      if (covered(d.tx, d.y - 4 * s)) return;
+      emit(R.wheel, 4, d.tx - 24 * s, d.y - 2 * s, -HALF - 1, 1.3); emit(R.wheel, 4, d.tx + 24 * s, d.y - 2 * s, -HALF + 1, 1.3);
+    } else if (p.step === 'open') {
+      if (!covered(d.tx, d.ty)) emit(R.twinkle, 3, d.tx, d.ty - 12 * s);
+    } else if (p.step === 'sign') {
+      x = num(d.sx) ? d.sx : d.tx; y = num(d.sy) ? d.sy : d.y - 1.05 * (d.h || 120);
+      if (covered(x, y)) return;
+      for (i = 0; i < 3; i++) if ((o = emit(R.puff, 1, x + (i - 1) * 16 * s, y - 6 * s, -HALF, 0.35))) { o.delay = 0.3; o.s0 *= 0.5; o.s1 *= 0.5; }
+    } else if (p.step === 'ready') {
+      x = d.tx; y = d.ty - 10 * s;
+      if (modalUp() || covered(x, y)) return;
+      if (lowMo) { emit(R.twinkle, 5, x, y); return; }
+      emit(R.riseStar, 5, x, y - 20 * s); emit(R.spark, 8, x, y, -HALF, 0.8); emit(R.twinkle, 6, x, y); emit(R.pop, 1, x, y);   // rising, so nothing rains onto a sheet below
+      ring(x, y, 6, 56 * s, 0.4, '#ffd83d', 3);
+    }
   });
 
   // UI juice: a spark where the player presses any big action button

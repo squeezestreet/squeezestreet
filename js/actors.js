@@ -1,5 +1,7 @@
 /* Squeeze Street — actors.js: the stand, the vendor, customers, bubbles, tip coins, the badges
- * over regulars, and Dex the Dealer with his rolling trunk. SS.Actors.dealerPos() tells FX where Dex is.
+ * over regulars, and Dex the Dealer with his rolling trunk: on the mornings he visits he tows it in and
+ * sets up (emitting 'dealer:setup' steps), and at closing he packs up and rolls off.
+ * SS.Actors.dealerPos() tells FX where Dex is; dealerReady() says he is open for business.
  * shortcut: one compact rig for all nine customer kinds (props tell them apart), upgrade to
  * per-kind rigs and richer stand tiers if the art needs to carry more. */
 (function () {
@@ -22,12 +24,23 @@
   var EMPTY = [], dex = { on: false, offers: EMPTY, cols: [], sold: false, lim: false, edge: 1e9, hudL: 1e9, hudB: -1e9, at: -1e9 };
   var spot = { x: 0, y: 0, s: 1, off: 64, tx: 0, lift: 0, dx: 0, edge: 1e9 };
   var dealT = 0, lookT = 0, lookCD = 0, limT = 0, glowT = {}, glows = {};
+  /* Dex's show: he tows his trunk in on the mornings he visits and sets up, and packs up and rolls off at closing.
+     mode AWAY (not in the scene), IN (arriving; t < 0 waits for the screen change), SET (open for business), OUT (leaving).
+     q = this show's 'dealer:setup' steps with their times; qi = the next one to emit.
+     LEAVE = seconds before closing time (at the game's speed) he starts packing up, so it plays in the scene, not under the results sheet. */
+  var AWAY = 0, IN = 1, SET = 2, OUT = 3, WAIT = 0.7, TADA = 1.65, TOW = 86, PUSH = 80, LEAVE = 2.4;
+  var show = { mode: AWAY, ph: '', t: 0, since: 0, hold: false, q: [], qi: 0, roll: 1.2, tP: 0, tO: 0, tS: 0, po: 1, dur: 1, d0: 0, d1: 0, tada: 99 };
+  var idle0 = 0;                                           // env.t his idle cycle counts from: its neutral first frame lands as the ta-da ends
+  // this frame: where Dex (x) and his trunk (tx) are, his pose, and how far along each moving part of the trunk is (all 1 = open)
+  var cur = { x: 0, tx: 0, y: 0, s: 1, face: -1, pose: -1, k: 0, wk: null, hop: 0, note: -1, grip: 0 };
+  var A = { lid: 1, bar: 1, awn: 1, pole: 1, fold: 1, sway: 0, bulbs: 99, neon: 1, wheel: 0, spin: 0, rock: 0, sq: 0, bounce: 0, hdl: 0, hx: 0, hy: 0, bk: [], fl: [] };
+  var GRIP = { 7: { lean: 0.2, x: 30, y: 20 }, 13: { lean: 0.12, x: -27, y: 25 } }, G = { x: 0, y: 0 }, G2 = { x: 0, y: 0 };   // the hand on the trunk's handle: pushing, towing
   SS.on('brew:tap', function () { tapT = 0.22; });
   SS.on('bell', function () { bellT = 0.9; });
   SS.on('sale', function () { cheerT = 0.45; if (lookCD <= 0) { lookT = 1.3; lookCD = 4.5; } });   // Dex reacts, but not to every single cup
   SS.on('dealer:buy', function () { dealT = 1.5; lookT = 0; dex.at = -1e9; });
   SS.on('boost:on', function (p) { if (p && p.id) glowT[p.id] = 1.6; dex.at = -1e9; });
-  SS.on('phase', function () { dex.at = -1e9; });
+  SS.on('phase', function () { dex.at = -1e9; show.since = 0; show.hold = false; });
 
   function pick(list, r) { return list[Math.min(list.length - 1, Math.floor(r * list.length))]; }
   function lookOf(c) {
@@ -370,16 +383,19 @@
   /* ------------------------------------------------------------------ *
    * Dex the Dealer and his rolling trunk
    * ------------------------------------------------------------------ */
-  /** is Dex here? Re-read a few times a second (and on his events), not every frame */
+  /** is Dex here? Re-read a few times a second (and on his events), not every frame.
+      When he is not, the last stock and layout are kept: his exit at closing still draws them. */
   function dexOn(st) {
-    var now = performance.now(), ph = st && st.phase, info = null, i, o, f, sh, sc, r, c;
+    var now = performance.now(), ph = st && st.phase, info = null, on = false, offers = EMPTY, i, o, f, sh, sc, r, c;
     if (now - dex.at < 250) return dex.on;
-    dex.at = now; dex.on = false; dex.offers = EMPTY; dex.edge = 1e9; dex.hudL = 1e9; dex.hudB = -1e9;
+    dex.at = now;
     if (ph === 'prep' || ph === 'day') {
       if (SS.Sim && SS.Sim.dealerInfo) { try { info = SS.Sim.dealerInfo(); } catch (e) { info = null; } }
-      if (info) { dex.on = !!info.present; dex.offers = info.offers || EMPTY; }
-      else if (st.dealer && st.dealer.day === st.day) { dex.on = true; dex.offers = st.dealer.offers || EMPTY; }
+      if (info) { on = !!info.present; offers = info.offers || EMPTY; }
+      else if (st.dealer && st.dealer.day === st.day) { on = true; offers = st.dealer.offers || EMPTY; }
     }
+    if (!(dex.on = on)) return false;
+    dex.offers = offers; dex.edge = 1e9; dex.hudL = 1e9; dex.hudB = -1e9;
     dex.cols.length = 0; dex.sold = dex.offers.length > 0; dex.lim = false;
     for (i = 0; i < dex.offers.length; i++) {
       o = dex.offers[i] || {};
@@ -388,19 +404,17 @@
       if (!o.sold) dex.sold = false;
       if (o.kind === 'limited' && !o.sold) dex.lim = true;
     }
-    if (dex.on) {                                          // a sheet docked on the right hides that part of the scene
-      sh = document.getElementById('sheet'); sc = document.getElementById('scene');
-      if (sh && sc && !sh.hidden && sh.dataset.mode !== 'center') {
-        r = sh.getBoundingClientRect(); c = sc.getBoundingClientRect();
-        if (r.width && r.height && r.width < c.width * 0.8) dex.edge = r.left - c.left;
-      }
-      sh = document.querySelectorAll('#hud > .hud-stats, #hud > .hud-deals');      // the pills over the top right of the scene
-      for (i = 0; sc && i < sh.length; i++) {
-        r = sh[i].getBoundingClientRect(); c = sc.getBoundingClientRect();
-        if (r.width && r.height) { dex.hudL = Math.min(dex.hudL, r.left - c.left); dex.hudB = Math.max(dex.hudB, r.bottom - c.top); }
-      }
+    sh = document.getElementById('sheet'); sc = document.getElementById('scene');      // a sheet docked on the right hides that part of the scene
+    if (sh && sc && !sh.hidden && sh.dataset.mode !== 'center') {
+      r = sh.getBoundingClientRect(); c = sc.getBoundingClientRect();
+      if (r.width && r.height && r.width < c.width * 0.8) dex.edge = r.left - c.left;
     }
-    return dex.on;
+    sh = document.querySelectorAll('#hud > .hud-stats, #hud > .hud-deals');        // the pills over the top right of the scene
+    for (i = 0; sc && i < sh.length; i++) {
+      r = sh[i].getBoundingClientRect(); c = sc.getBoundingClientRect();
+      if (r.width && r.height) { dex.hudL = Math.min(dex.hudL, r.left - c.left); dex.hudB = Math.max(dex.hudB, r.bottom - c.top); }
+    }
+    return true;
   }
   /** where Dex and his trunk stand, in screen px. Beside the stand when there is room; on narrow
       screens he shrinks a little, stays fully on screen and the trunk tucks in behind him. */
@@ -436,7 +450,7 @@
     x.fillStyle = gr; x.fillRect(0, 0, 64, 64);
     return (glows[col] = g);
   }
-  function shoe(ctx, x) { box(ctx, x - 6, -8, 18, 8, 4, '#ffffff'); ctx.fillStyle = INK; ctx.fillRect(x - 5, -6.5, 5, 5); }
+  function shoe(ctx, x, dy) { dy = dy || 0; box(ctx, x - 6, dy - 8, 18, 8, 4, '#ffffff'); ctx.fillStyle = INK; ctx.fillRect(x - 5, dy - 6.5, 5, 5); }
   /** one arm: blazer sleeve in two parts, a shirt cuff and a hand. hand: 0 fist, 1 open palm, 2 thumb up, 3 finger gun, 4 beckoning finger */
   function arm(ctx, sx, sy, ex, ey, hx, hy, hand, fa) {
     limb(ctx, sx, sy, ex, ey, 9, DEX.blazer); limb(ctx, ex, ey, hx, hy, 8, DEX.blazer);
@@ -450,15 +464,37 @@
     ctx.fillStyle = DEX.skin; ctx.fill(); ctx.strokeStyle = INK; ctx.lineWidth = 2.5; ctx.stroke();
   }
   /* Dex himself, facing +x, origin at his feet.
-     pose: 0 idle, 1 beckon, 2 coin flip, 3 presenting the trunk, 4 double thumbs-up, 5 relaxed, 6 finger guns; k = 0..1 through it */
-  function dexRig(ctx, env, pose, k) {
-    var t = env.t, red = env.reduced, H = 116, br = Math.sin(t * 2.2) * (red ? 0.6 : 1.3), lean = pose === 5 ? -0.14 : pose === 6 ? 0.06 : 0;
-    var hip = -0.44 * H, sh = -0.77 * H - br, hy = -0.905 * H - br, hr = 0.15 * H, e, a, fx, fy, ex, ey, hx, hy2, u, pump;
-    limb(ctx, -3, hip, -6, -6, 10, DEX.pants); limb(ctx, 4, hip, 11, -6, 10, DEX.pants);
-    shoe(ctx, -6); shoe(ctx, 11);
+     pose: 0 idle, 1 beckon, 2 coin flip, 3 presenting the trunk, 4 double thumbs-up, 5 relaxed, 6 finger guns,
+     7 pushing the trunk, 8 walking, 9 ta-da, 10 double finger guns, 11 stamping the brake, 12 pointing up, 13 towing the trunk;
+     k = 0..1 through it; wk = walk-cycle phase in radians (null = standing) */
+  function dexRig(ctx, env, pose, k, wk) {
+    var t = env.t, red = env.reduced, H = 116, walk = wk != null, sw = walk ? Math.sin(wk) : 0, bob = walk ? Math.abs(Math.cos(wk)) * 2.2 : 0, g = GRIP[pose];
+    var dn = pose === 10 ? SS.smooth((k - 0.64) / 0.36) : 0;   // the finger guns come down to rest over the ta-da's last 0.25 s
+    var br = Math.sin(t * 2.2) * (red ? 0.6 : 1.3), lean = g ? g.lean : pose === 5 ? -0.14 : pose === 6 ? 0.06 : pose === 10 ? 0.06 * (1 - dn) : pose === 11 ? -0.06 : 0;
+    var hip = -0.44 * H - bob, sh = -0.77 * H - br - bob, hy = -0.905 * H - br - bob, hr = 0.15 * H, e, a, fx, fy, ex, ey, hx, hy2, u, pump, f1, f2;
+    if (walk) {                                            // a stride: the feet swing about the hips and the lifted one clears the ground
+      f1 = 2.5 - sw * 13; f2 = 2.5 + sw * 13; a = Math.max(0, -sw) * 5; u = Math.max(0, sw) * 5;
+      limb(ctx, -3, hip, f1, -6 - a, 10, DEX.pants); limb(ctx, 4, hip, f2, -6 - u, 10, DEX.pants);
+      shoe(ctx, f1, -a); shoe(ctx, f2, -u);
+    } else if (pose === 11) {                              // the front foot comes up, then stamps the brake down
+      u = k < 0.4 ? Math.sin(Math.PI / 2 * k / 0.4) : k < 0.5 ? Math.cos(Math.PI / 2 * (k - 0.4) / 0.1) : 0;
+      limb(ctx, -3, hip, -6, -6, 10, DEX.pants); limb(ctx, 4, hip, 11 + 7 * u, -6 - 13 * u, 10, DEX.pants);
+      shoe(ctx, -6); shoe(ctx, 11 + 7 * u, -13 * u);
+    } else {
+      limb(ctx, -3, hip, -6, -6, 10, DEX.pants); limb(ctx, 4, hip, 11, -6, 10, DEX.pants);
+      shoe(ctx, -6); shoe(ctx, 11);
+    }
     ctx.save(); ctx.translate(0, hip); ctx.rotate(lean); ctx.translate(0, -hip);
-    // back arm: hand on hip, behind his head (relaxed), or up for the second thumb
+    pump = red ? 0 : -Math.abs(Math.sin(k * TAU * 2.5)) * 3;
+    e = pose === 9 ? SS.ease.outBack(SS.clamp(k / 0.3, 0, 1)) : 0;
+    // back arm: hand on hip, behind his head (relaxed), up for the second thumb, or one of the show's poses
     if (pose === 5) arm(ctx, -6, sh + 7, -23, sh - 9, -9, hy - 1, 0);
+    else if (pose === 7) arm(ctx, -6, sh + 7, 10, sh + 21, 26, sh + 21, 0);
+    else if (pose === 13) arm(ctx, -6, sh + 7, -17, sh + 15, g.x, sh + g.y, 0);
+    else if (pose === 8) arm(ctx, -6, sh + 7, -5 + sw * 6, sh + 19, -3 + sw * 13, sh + 30, 1);
+    else if (pose === 9) arm(ctx, -6, sh + 7, SS.lerp(-14, -20, e), SS.lerp(sh + 22, sh + 1, e), SS.lerp(-12, -30, e), SS.lerp(sh + 33, sh - 12, e), 1);
+    else if (pose === 10) arm(ctx, -6, sh + 7, SS.lerp(8, -20, dn), sh + 22 + 3 * dn, SS.lerp(24, -13, dn), SS.lerp(sh + 18 + pump, hip + 3, dn), dn > 0.5 ? 0 : 3);
+    else if (pose === 11) arm(ctx, -6, sh + 7, -18, sh + 16, -26, sh + 6, 1);
     else if (pose !== 4) arm(ctx, -6, sh + 7, -20, sh + 25, -13, hip + 3, 0);
     // blazer, shirt, lapels, gold chain, pocket square, buttons
     box(ctx, -0.165 * H, sh, 0.33 * H, hip - sh + 11, 0.07 * H, DEX.blazer);
@@ -474,7 +510,6 @@
     ctx.fillStyle = DEX.square; ctx.fill(); ctx.stroke();
     ctx.strokeStyle = DEX.lapel; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(-16, sh + 17.5); ctx.lineTo(-5, sh + 17.5); ctx.stroke();
     ctx.fillStyle = DEX.gold; ctx.beginPath(); ctx.arc(6, sh + 34, 2, 0, TAU); ctx.arc(6, sh + 42, 2, 0, TAU); ctx.fill();
-    pump = red ? 0 : -Math.abs(Math.sin(k * TAU * 2.5)) * 3;
     if (pose === 4) arm(ctx, -6, sh + 7, 4, sh + 25, 13, sh + 2 + pump, 2);
     if (pose === 5) arm(ctx, 5, sh + 7, 18, sh - 12, 3, hy - 4, 0);
     // head: ear, pompadour, shades, big grin with a gold tooth
@@ -494,7 +529,7 @@
     ctx.beginPath(); ctx.moveTo(hr * 0.1, hy + hr * 0.3); ctx.quadraticCurveTo(hr * 0.52, hy + hr * 1.0, hr * 0.98, hy + hr * 0.2); ctx.quadraticCurveTo(hr * 0.55, hy + hr * 0.42, hr * 0.1, hy + hr * 0.3); ctx.closePath();
     ctx.fillStyle = '#ffffff'; ctx.fill(); ctx.strokeStyle = INK; ctx.lineWidth = 2.2; ctx.stroke();
     ctx.fillStyle = DEX.gold; ctx.fillRect(hr * 0.5, hy + hr * 0.37, hr * 0.15, hr * 0.17);
-    if (!red && pose === 0 && ((t % 7.2) + 7.2) % 7.2 > 2.1 && ((t % 7.2) + 7.2) % 7.2 < 2.45) star(ctx, hr * 0.62, hy + hr * 0.42, 4.5, '#fff4b8');   // ting!
+    if (!red && pose === 0 && (((t - idle0) % 7.2) + 7.2) % 7.2 > 2.1 && (((t - idle0) % 7.2) + 7.2) % 7.2 < 2.45) star(ctx, hr * 0.62, hy + hr * 0.42, 4.5, '#fff4b8');   // ting!
     // front arm
     if (pose === 1) {                                      // "come here": arm up, the hand curls in again and again
       e = SS.smooth(Math.min(k, 1 - k) / 0.16); a = -1.45 - 0.35 * Math.sin(k * TAU * 3);
@@ -509,6 +544,12 @@
     } else if (pose === 3) arm(ctx, 5, sh + 7, 19, sh + 19, 33, sh + 15, 1);
     else if (pose === 4) arm(ctx, 5, sh + 7, 17, sh + 22, 25, sh + 4 + pump, 2);
     else if (pose === 6) arm(ctx, 5, sh + 7, 17, sh + 17, 28, sh + 13, 3);
+    else if (pose === 7) arm(ctx, 5, sh + 7, 19, sh + 21, g.x, sh + g.y, 0);
+    else if (pose === 8 || pose === 13) arm(ctx, 5, sh + 7, 9 - sw * 5, sh + 19, 6 - sw * 13, sh + 30, 1);
+    else if (pose === 9) arm(ctx, 5, sh + 7, SS.lerp(12, 20, e), SS.lerp(sh + 27, sh + 1, e), SS.lerp(22, 31, e), SS.lerp(sh + 31, sh - 12, e), 1);
+    else if (pose === 10) arm(ctx, 5, sh + 7, SS.lerp(17, 12, dn), sh + 17 + 10 * dn, SS.lerp(28, 22, dn), SS.lerp(sh + 13 + pump, sh + 31, dn), dn > 0.5 ? 1 : 3);
+    else if (pose === 11) arm(ctx, 5, sh + 7, 17, sh + 14, 27, sh + 8, 1);
+    else if (pose === 12) arm(ctx, 5, sh + 7, 15, sh - 6, 19, sh - 22, 4, -1.35);
     else if (pose !== 5) arm(ctx, 5, sh + 7, 12, sh + 27, 22, sh + 31 + Math.sin(t * 1.7) * 1.5, 1);
     ctx.restore();
   }
@@ -522,49 +563,105 @@
     if (big) star(ctx, x, y - h - 9, 5, '#ffd83d');
     else box(ctx, x - 3, y - h - 9, 6, 4, 1.5, '#d9a273');
   }
-  /** the trunk itself (behind Dex): wheels, leather, the open display of glowing bottles, the striped awning */
+  /** a four-point twinkle */
+  function twinkle(ctx, x, y, r, col) {
+    ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(x, y - r); ctx.quadraticCurveTo(x + r * 0.17, y - r * 0.17, x + r, y); ctx.quadraticCurveTo(x + r * 0.17, y + r * 0.17, x, y + r);
+    ctx.quadraticCurveTo(x - r * 0.17, y + r * 0.17, x - r, y); ctx.quadraticCurveTo(x - r * 0.17, y - r * 0.17, x, y - r); ctx.fill();
+  }
+  /** three spokes in each wheel so you can see them turn (a = angle, al = how much they show) */
+  function spokes(ctx, a, al) {
+    var w, j, q;
+    ctx.globalAlpha = al; ctx.strokeStyle = '#c9cde6'; ctx.lineWidth = 1.7; ctx.lineCap = 'round'; ctx.beginPath();
+    for (w = -21; w <= 21; w += 42) for (j = 0; j < 3; j++) { q = a + j * TAU / 3; ctx.moveTo(w, -7); ctx.lineTo(w + Math.cos(q) * 5.6, -7 + Math.sin(q) * 5.6); }
+    ctx.stroke(); ctx.globalAlpha = 1;
+  }
+  /** the lid, hinged along the trunk's top edge: v 0 = shut over the display, 1 = swung up edge-on behind the awning, above 1 = its velvet inside shows */
+  function lid(ctx, v) {
+    var c = Math.cos(v * Math.PI / 2), i;
+    if (c > -0.03 && c < 0.03) return;
+    ctx.save(); ctx.translate(0, -88); ctx.scale(1, c);
+    if (c > 0) {                                           // the outside: leather, two straps, gold corners, his monogram and the clasp
+      box(ctx, -34, 0, 68, 50, 7, DEX.trunk);
+      ctx.fillStyle = 'rgba(255,236,200,.16)'; ctx.fillRect(-29, 4, 58, 5);
+      for (i = -1; i <= 1; i += 2) {
+        box(ctx, i * 16 - 4, 0, 8, 50, 2, '#7a3418');
+        box(ctx, i * 16 - 6, 32, 12, 10, 2.5, DEX.gold); ctx.fillStyle = '#7a3418'; ctx.fillRect(i * 16 - 2.5, 35, 5, 4);
+      }
+      for (i = 0; i < 4; i++) box(ctx, (i & 1 ? 25 : -34), (i & 2 ? 41 : 0), 9, 9, 2.5, DEX.gold);
+      ctx.beginPath(); ctx.ellipse(0, 19, 10.5, 8.5, 0, 0, TAU); ctx.fillStyle = DEX.gold; ctx.fill(); ctx.strokeStyle = INK; ctx.lineWidth = 2.4; ctx.stroke();
+      ctx.beginPath(); ctx.ellipse(0, 19, 7.6, 5.8, 0, 0, TAU); ctx.strokeStyle = '#c98a1a'; ctx.lineWidth = 1.2; ctx.stroke();
+      ctx.font = '8px "Bagel Fat One", "Arial Rounded MT Bold", system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#7a3418'; ctx.fillText('DEX', 0, 19.5, 15);
+      box(ctx, -5, 43, 10, 9, 2.5, DEX.gold); ctx.fillStyle = INK; ctx.fillRect(-1, 46, 2, 3.5);
+    } else {                                               // the inside: velvet lining
+      box(ctx, -34, 0, 68, 50, 7, DEX.lapel);
+      box(ctx, -28, 5, 56, 40, 5, DEX.velvet);
+    }
+    ctx.restore();
+  }
+  function stripes(ctx) {
+    for (var i = 0, bx; i < 6; i++) {
+      bx = -38 + i * 76 / 6;
+      ctx.beginPath(); ctx.moveTo(bx, -106); ctx.lineTo(bx + 76 / 6, -106); ctx.lineTo(bx + 76 / 6, -93); ctx.arc(bx + 38 / 6, -93, 38 / 6, 0, Math.PI); ctx.closePath();
+      ctx.fillStyle = i & 1 ? '#ffe14d' : '#7a5cff'; ctx.fill(); ctx.strokeStyle = INK; ctx.lineWidth = 2.5; ctx.stroke();
+    }
+  }
+  /** the awning on its bar. Shut, the bar sits on the trunk on top of the rolled-up awning; it rises on two struts and the awning unrolls down */
+  function awning(ctx) {
+    var by = -110 + 9 * (1 - A.bar), u = A.awn, cy = by + 6 + 18 * u, rh = 7 * Math.sqrt(Math.max(0, 1 - u)), i;
+    if (u >= 1 && A.bar >= 1) { stripes(ctx); box(ctx, -40, -110, 80, 6, 3, '#7a5cff'); return; }
+    ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(-35, -88); ctx.lineTo(-35, by + 5); ctx.moveTo(35, -88); ctx.lineTo(35, by + 5);
+    ctx.strokeStyle = INK; ctx.lineWidth = 3.6; ctx.stroke(); ctx.strokeStyle = '#8a8fb5'; ctx.lineWidth = 1.6; ctx.stroke();
+    if (u > 0) { ctx.save(); ctx.beginPath(); ctx.rect(-44, by, 88, cy - by + rh / 2 + 0.5); ctx.clip(); ctx.translate(0, by + 110); stripes(ctx); ctx.restore(); }
+    if (rh > 0.4) {                                        // the roll, thinner the further it has unrolled
+      box(ctx, -39, cy, 78, rh, rh / 2, '#ffe14d');
+      if (rh > 3.5) { ctx.fillStyle = '#7a5cff'; for (i = 0; i < 6; i++) ctx.fillRect(-36 + i * 76 / 6 + 3, cy + 1.6, 5, rh - 3.2); }
+    }
+    box(ctx, -40, by, 80, 6, 3, '#7a5cff');
+  }
+  /** the trunk itself (behind Dex): wheels, leather, the display of glowing bottles behind its lid, the striped awning.
+      A says how far along each moving part is; all at rest = open for business */
   function trunkBody(ctx, env, st) {
-    var t = env.t, red = env.reduced, offers = dex.offers, n = offers.length, act = st && st.boosts, i, o, bx, r, a, g;
+    var t = env.t, red = env.reduced, offers = dex.offers, n = offers.length, act = st && st.boosts, i, o, bx, r, a, g, k, f;
     ctx.fillStyle = INK; ctx.beginPath(); ctx.arc(-21, -7, 7.5, 0, TAU); ctx.moveTo(28.5, -7); ctx.arc(21, -7, 7.5, 0, TAU); ctx.fill();
     ctx.fillStyle = '#c9cde6'; ctx.beginPath(); ctx.arc(-21, -7, 2.6, 0, TAU); ctx.moveTo(23.6, -7); ctx.arc(21, -7, 2.6, 0, TAU); ctx.fill();
+    if (A.spin > 0.02) spokes(ctx, A.wheel, A.spin);
     box(ctx, -34, -88, 68, 76, 7, DEX.trunk);
     box(ctx, -27, -81, 54, 41, 5, DEX.velvet);
     box(ctx, -24, -36, 48, 18, 4, DEX.drawer);
     box(ctx, -8, -30, 16, 5, 2.5, DEX.gold);
     for (i = 0; i < 4; i++) box(ctx, (i & 1 ? 25 : -34), (i & 2 ? -21 : -88), 9, 9, 2.5, DEX.gold);
-    // glows first, added light on the dark velvet; then the bottles
-    if (n) {
+    // glows first, added light on the dark velvet; then the bottles (each pops up with a flash of its colour as he sets up)
+    if (n && A.lid > 0.05) {
       ctx.globalCompositeOperation = 'lighter';
       for (i = 0; i < n; i++) {
-        o = offers[i] || {};
-        if (o.kind === 'limited' && o.sold) continue;
+        o = offers[i] || {}; k = A.bk[i]; f = A.fl[i] || 0;
+        if ((o.kind === 'limited' && o.sold) || !(k > 0)) continue;
         bx = -24 + 48 * (i + 0.5) / n; g = glowT[o.id] || 0;
         a = act && act.indexOf(o.id) >= 0 ? 0.95 : red ? 0.55 : 0.5 + 0.22 * Math.sin(t * 3 + i * 1.7);
         r = (o.kind === 'limited' ? 17 : 13) * (1 + (act && act.indexOf(o.id) >= 0 ? 0.25 : 0) + (g > 0 ? 0.9 * g / 1.6 * (red ? 0.6 : 1 + 0.25 * Math.sin(t * 18)) : 0));
-        ctx.globalAlpha = Math.min(1, a + g); ctx.drawImage(glowOf(dex.cols[i]), bx - r, -54 - r, 2 * r, 2 * r);
+        if (k < 1 || f > 0) r *= Math.min(1, k) * (1 + 1.4 * f);
+        ctx.globalAlpha = Math.min(1, a + g + f); ctx.drawImage(glowOf(dex.cols[i]), bx - r, -54 - r, 2 * r, 2 * r);
       }
       ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
       for (i = 0; i < n; i++) {
-        o = offers[i] || {};
-        if (o.kind === 'limited' && o.sold) continue;
+        o = offers[i] || {}; k = A.bk[i]; f = A.fl[i] || 0;
+        if ((o.kind === 'limited' && o.sold) || !(k > 0)) continue;
         bx = -24 + 48 * (i + 0.5) / n;
-        bottle(ctx, bx, -44, dex.cols[i], o.kind === 'limited');
-        if (act && act.indexOf(o.id) >= 0) {               // yours today: a gold twinkle over the bottle
+        if (k === 1) bottle(ctx, bx, -44, dex.cols[i], o.kind === 'limited');
+        else { ctx.save(); ctx.translate(bx, -44 + Math.max(0, 1 - k) * 10); ctx.scale(k, k); bottle(ctx, 0, 0, dex.cols[i], o.kind === 'limited'); ctx.restore(); }
+        if (f > 0) twinkle(ctx, bx + 6, -66 - 6 * (1 - f), 9 * f, '#ffffff');
+        if (k === 1 && act && act.indexOf(o.id) >= 0) {   // yours today: a gold twinkle over the bottle
           ctx.fillStyle = '#ffe14d'; ctx.beginPath(); ctx.moveTo(bx, -81); ctx.quadraticCurveTo(bx + 1, -76, bx + 5, -75); ctx.quadraticCurveTo(bx + 1, -74, bx, -69);
           ctx.quadraticCurveTo(bx - 1, -74, bx - 5, -75); ctx.quadraticCurveTo(bx - 1, -76, bx, -81); ctx.fill();
         }
       }
     }
     box(ctx, -29, -47, 58, 5, 2, '#e8b04a');                 // the shelf
-    // awning
-    for (i = 0; i < 6; i++) {
-      bx = -38 + i * 76 / 6;
-      ctx.beginPath(); ctx.moveTo(bx, -106); ctx.lineTo(bx + 76 / 6, -106); ctx.lineTo(bx + 76 / 6, -93); ctx.arc(bx + 38 / 6, -93, 38 / 6, 0, Math.PI); ctx.closePath();
-      ctx.fillStyle = i & 1 ? '#ffe14d' : '#7a5cff'; ctx.fill(); ctx.strokeStyle = INK; ctx.lineWidth = 2.5; ctx.stroke();
-    }
-    box(ctx, -40, -110, 80, 6, 3, '#7a5cff');
-    if (dex.sold) {
-      ctx.save(); ctx.translate(0, -62); ctx.rotate(-0.16); box(ctx, -34, -10, 68, 20, 5, '#ff6257');
+    if (A.lid !== 1) lid(ctx, A.lid);
+    awning(ctx);
+    if (dex.sold && A.awn > 0.05) {
+      ctx.save(); ctx.translate(0, -62); ctx.rotate(-0.16); if (A.awn < 1) ctx.scale(A.awn, A.awn); box(ctx, -34, -10, 68, 20, 5, '#ff6257');
       ctx.font = '15px "Bagel Fat One", "Arial Rounded MT Bold", system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillStyle = '#ffffff'; ctx.fillText('SOLD OUT', 0, 1, 60); ctx.restore();
     }
@@ -575,30 +672,57 @@
   }
   /** the hanging DEX'S DEALS sign and the LIMITED starburst, drawn over Dex, the passers-by and their bubbles so they always read.
       pole = true draws only the pole it hangs from (behind Dex, with the trunk); it stays on screen */
+  /** one marquee bulb; j = its place in the switch-on order around the edge (bulbs light one by one as he sets up) */
+  function bulb(ctx, x, y, j, lit) {
+    var on = A.bulbs - j;
+    ctx.fillStyle = on > 0 ? lit : '#5f4f9c';
+    ctx.beginPath(); ctx.arc(x, y, on > 0 && on < 1 ? 1.9 + 1.6 * (1 - on) : 1.9, 0, TAU); ctx.fill();
+  }
   function trunkTop(ctx, env, p, pole) {
-    var t = env.t, red = env.reduced, dx = p.dx, tight = p.lift > 0, hw = tight ? 25 : 40, hh = tight ? 31 : 22, sy = -116 - p.lift, top = sy - hh, i, r, k, sc, a, n;
+    var t = env.t, red = env.reduced, dx = p.dx, tight = p.lift > 0, hw = tight ? 25 : 40, hh = tight ? 31 : 22, sy = -116 - p.lift, top = sy - hh, i, r, k, sc, a, n, x, tr;
     var px = Math.min(30, (p.edge - p.tx) / p.s - 4);
     ctx.lineCap = 'round';
-    if (pole) {
-      ctx.strokeStyle = INK; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(px, -110); ctx.lineTo(px, top - 7); ctx.lineTo(Math.min(px, dx - hw + 10), top - 7); ctx.stroke();
+    if (pole) {                                            // it telescopes up out of the awning bar, then the arm swings out
+      if (A.pole <= 0) return;
+      ctx.beginPath(); ctx.moveTo(px, -110);
+      if (A.pole >= 1) { ctx.lineTo(px, top - 7); ctx.lineTo(Math.min(px, dx - hw + 10), top - 7); }
+      else {
+        ctx.lineTo(px, SS.lerp(-110, top - 7, SS.ease.outCubic(Math.min(1, A.pole / 0.6))));
+        if (A.pole > 0.6) ctx.lineTo(SS.lerp(px, Math.min(px, dx - hw + 10), SS.ease.outCubic((A.pole - 0.6) / 0.4)), top - 7);
+      }
+      ctx.strokeStyle = INK; ctx.lineWidth = 5; ctx.stroke();
       ctx.strokeStyle = '#8a8fb5'; ctx.lineWidth = 2.5; ctx.stroke();
       return;
     }
+    if (A.fold <= 0.01) return;
+    tr = A.fold !== 1 || A.sway !== 0;                     // dropping in (or folding away): it hangs from its chains and swings
+    if (tr) { ctx.save(); ctx.translate(dx, top - 7); ctx.rotate(A.sway); ctx.scale(1, A.fold); ctx.translate(-dx, 7 - top); }
     ctx.strokeStyle = INK; ctx.lineWidth = 1.8; ctx.beginPath(); ctx.moveTo(dx - hw + 14, top - 7); ctx.lineTo(dx - hw + 14, top); ctx.moveTo(dx + hw - 14, top - 7); ctx.lineTo(dx + hw - 14, top); ctx.stroke();
     box(ctx, dx - hw, top, hw * 2, hh, 7, '#3b2a7a');
     k = red ? 0 : Math.floor(t * 5); n = tight ? 5 : 8;
-    for (i = 0; i < n; i++) {                               // marquee bulbs chase along the edges
-      ctx.fillStyle = (i + k) % 2 ? '#fff4b8' : '#ff8fb3';
-      ctx.beginPath(); ctx.arc(dx - hw + 8 + i * (hw * 2 - 16) / (n - 1), top + 2.5, 1.9, 0, TAU); ctx.arc(dx - hw + 8 + i * (hw * 2 - 16) / (n - 1), sy - 2.5, 1.9, 0, TAU); ctx.fill();
+    if (A.bulbs >= 2 * n) {
+      for (i = 0; i < n; i++) {                             // marquee bulbs chase along the edges
+        ctx.fillStyle = (i + k) % 2 ? '#fff4b8' : '#ff8fb3';
+        ctx.beginPath(); ctx.arc(dx - hw + 8 + i * (hw * 2 - 16) / (n - 1), top + 2.5, 1.9, 0, TAU); ctx.arc(dx - hw + 8 + i * (hw * 2 - 16) / (n - 1), sy - 2.5, 1.9, 0, TAU); ctx.fill();
+      }
+    } else {
+      for (i = 0; i < n; i++) {                             // switching on one by one, along the top and back along the bottom
+        x = dx - hw + 8 + i * (hw * 2 - 16) / (n - 1);
+        bulb(ctx, x, top + 2.5, i, (i + k) % 2 ? '#fff4b8' : '#ff8fb3'); bulb(ctx, x, sy - 2.5, 2 * n - 1 - i, (i + k) % 2 ? '#fff4b8' : '#ff8fb3');
+      }
     }
-    ctx.font = '12px "Bagel Fat One", "Arial Rounded MT Bold", system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#ffd83d';
+    ctx.font = '12px "Bagel Fat One", "Arial Rounded MT Bold", system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = A.neon >= 1 || (A.neon > 0 && (A.neon * 5 | 0) % 2 === 1) ? '#ffd83d' : '#776596';   // the neon buzzes on
     if (tight) { ctx.fillText('DEX\'S', dx, top + 10.5, 42); ctx.fillText('DEALS', dx, top + 21.5, 42); }
     else ctx.fillText('DEX\'S DEALS', dx, top + 11.5, 66);
-    if (dex.lim && !dex.sold) {                            // a limited flavour is still for sale
-      sc = red || (limT <= 0 && !(env.dt > 0)) ? 1 : SS.ease.outBack(SS.clamp(limT / 0.4, 0, 1));   // frozen frames show it fully popped
+    if (dex.lim && !dex.sold && (limT > 0 || red)) {       // a limited flavour is still for sale: slams in once he is set up
+      a = 1;
+      if (red) sc = 1;
+      else if (limT < 0.22) { r = limT / 0.22; sc = 1.9 - 0.9 * r * r * r; a = Math.min(1, r * 2.5); }
+      else { r = limT - 0.22; sc = 1 + 0.16 * Math.sin(r * 26) * Math.exp(-r * 8); }
       if (!red) sc *= 1 + 0.07 * Math.sin(t * 5);
       if (tight) sc *= 0.8;
-      ctx.save(); ctx.translate(dx + (tight ? 0 : 10), top - (tight ? 21 : 26)); ctx.scale(sc, sc); ctx.rotate(red ? -0.12 : -0.12 + 0.07 * Math.sin(t * 1.7));
+      ctx.save(); ctx.globalAlpha = a; ctx.translate(dx + (tight ? 0 : 10), top - (tight ? 21 : 26)); ctx.scale(sc, sc); ctx.rotate(red ? -0.12 : -0.12 + 0.07 * Math.sin(t * 1.7));
       ctx.beginPath();
       for (i = 0; i < 32; i++) { a = i * Math.PI / 16; r = i % 2 ? 21 : 28; ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r); }
       ctx.closePath(); ctx.fillStyle = '#ff6257'; ctx.fill(); ctx.strokeStyle = INK; ctx.lineWidth = 2.5; ctx.stroke();
@@ -607,36 +731,250 @@
       inkText(ctx, 'LIMITED', 0, 0.5, '#ffffff', 3);
       ctx.restore();
     }
+    if (tr) ctx.restore();
+  }
+  /* ------------------------------------------------------------------ *
+   * Dex's show. Each morning he visits he tows his trunk in from the right, stamps the brake,
+   * opens the lid, pops the bottles up one by one, hangs his sign and takes a bow. At closing he
+   * packs it all away and pushes the trunk off. Steps go out on the bus as 'dealer:setup'.
+   * ------------------------------------------------------------------ */
+  function say(step, i, quiet) {
+    var p = { step: step };
+    if (i != null) p.i = i;
+    if (quiet) p.quiet = true;                             // snapped into place with no show: listeners skip their fanfare
+    SS.emit('dealer:setup', p);
+  }
+  function due(step, at, i) { show.q.push({ s: step, at: at, i: i }); }
+  /** units from his parking spot to where the trunk starts: far enough right that Dex, walking ahead of it, is out of sight too */
+  function entry(p, view) { return Math.max(130, (Math.min(view.w, dex.edge) - p.tx) / p.s + TOW + 34); }
+  function begin(mode, ph, view, t0) {
+    var p = dexLayout(view), n = dex.offers.length, i, b;
+    show.mode = mode; show.ph = ph; show.t = t0; show.q.length = 0; show.qi = 0; show.tada = 99;
+    if (mode === IN) {
+      limT = 0;                                            // yesterday's LIMITED slam must not show as the sign drops
+      show.d0 = entry(p, view);
+      show.roll = SS.clamp(0.7 + show.d0 / 260, 1.1, 1.6);
+      show.tP = show.roll + 0.575; show.tO = show.tP + 0.2;
+      due('arrive', 0); due('park', show.tP); due('open', show.tO);
+      for (i = 0, b = show.tO + 0.42; i < n; i++, b += 0.17) due('bottle', b, i);
+      show.tS = n ? b + 0.08 : show.tO + 0.55;
+      due('sign', show.tS); due('ready', show.tS + 0.84);
+    } else {
+      show.po = 1.02;
+      show.d1 = Math.max(80, (view.w + 110 * p.s - p.tx) / p.s);
+      show.dur = SS.clamp(0.6 + show.d1 / 450, 0.85, 1.3);
+      due('leave', 0); due('gone', show.po + show.dur);
+    }
+  }
+  function setUp(quiet) {
+    show.mode = SET; show.q.length = 0; show.tada = quiet ? 99 : 0; limT = quiet ? 9 : -0.5;
+    say('ready', null, quiet);                             // after: listeners already see dealerReady() and his parked dealerPos()
+  }
+  /** gone with no show (the game moved on): close the sequence so listeners never wait on him */
+  function away() {
+    if (show.mode === IN && show.qi === 0) { show.mode = AWAY; return; }   // never got as far as arriving
+    if (show.mode === IN || show.mode === SET) say('leave', null, true);
+    if (show.mode !== AWAY) say('gone', null, true);
+    show.mode = AWAY;
+  }
+  function fire() {
+    var q = show.q, e;
+    while (show.qi < q.length && show.t >= q[show.qi].at) {
+      e = q[show.qi++];
+      if (e.s === 'ready') { setUp(false); return; }
+      say(e.s, e.i);
+      if (e.s === 'gone') { show.mode = AWAY; return; }
+    }
+  }
+  /** advance the show; runs in update, so it freezes while paused */
+  function showStep(dt, view, env) {
+    var st = SS.state, ph = st ? st.phase : '', on = dexOn(st), frozen = !!(SS.debugEnv && SS.debugEnv.t != null), quick = env.reduced || frozen;
+    show.since += dt;
+    if (show.mode === AWAY) {
+      if (!on || show.hold) return;
+      if (ph === 'prep' && !quick) { begin(IN, ph, view, Math.min(0, show.since - WAIT)); return; }
+      if (ph === 'prep' && !frozen) { say('arrive'); setUp(false); return; }   // reduced motion: he is simply there, all set up
+      setUp(true);                                         // loading into the day: already set up
+    } else if (show.mode === IN) {
+      if (!on) { away(); return; }
+      if (ph !== show.ph || quick) { setUp(true); return; }   // opened for business mid-show: snap into place
+      if (show.t < 0) show.d0 = entry(dexLayout(view), view);   // while the camera and sheet settle: always just past the edge
+      show.t += dt; fire();
+    } else if (show.mode === SET) {
+      show.tada += dt;
+      if (show.tada >= TADA && show.tada - dt < TADA) idle0 = env.t - (show.tada - TADA);
+      if (on && ph === 'day' && !quick && st.today && (SS.DAY_LENGTH - st.today.clock) / ((st.settings && st.settings.speed) || 1) <= LEAVE) {
+        begin(OUT, ph, view, 0); fire(); show.hold = true; return;   // closing in: pack up where you can see it (held away for the rest of the day)
+      }
+      if (on) return;
+      if (ph === 'results' && !quick) { begin(OUT, ph, view, 0); fire(); } else away();
+    } else {
+      if ((ph !== show.ph && ph !== 'results') || quick) { say('gone', null, true); show.mode = AWAY; return; }   // a pack-up begun in the day runs on into results
+      show.t += dt; fire();
+    }
+  }
+
+  /** where Dex and his trunk are this frame and how far along each moving part is (cur, A); at rest outside a show */
+  function place(view) {
+    var p = dexLayout(view), n = dex.offers.length, i;
+    A.lid = A.bar = A.awn = A.pole = A.fold = A.neon = 1; A.bulbs = 99;
+    A.sway = A.spin = A.wheel = A.rock = A.sq = A.bounce = A.hdl = 0;
+    for (i = 0; i < n; i++) { A.bk[i] = 1; A.fl[i] = 0; }
+    cur.x = p.x; cur.tx = p.tx; cur.y = p.y; cur.s = p.s; cur.face = -1; cur.pose = -1; cur.k = 0; cur.wk = null; cur.hop = 0; cur.note = -1; cur.grip = 0;
+    if (show.mode === IN) placeIn(p, n); else if (show.mode === OUT) placeOut(p, n);
+    return cur;
+  }
+  function placeIn(p, n) {
+    var s = p.s, t = show.t, R = show.roll, u, e, d, k, i, b, g, v, x0;
+    A.lid = A.bar = A.awn = A.pole = A.fold = A.neon = A.bulbs = 0;
+    for (i = 0; i < n; i++) A.bk[i] = 0;
+    if (t < R) {                                           // towing it in, tipped back on one wheel, slowing to a stop
+      u = Math.max(0, t) / R; e = 1 - (1 - u) * (1 - u); v = Math.min(1, (1 - u) * 2.2);
+      d = show.d0 * (1 - e);
+      cur.tx = p.tx + d * s; cur.x = cur.tx - TOW * s;
+      A.wheel = d / 7.5; A.spin = 1; A.hdl = 1; cur.grip = 1;
+      A.rock = -0.15 + 0.03 * Math.sin(d * 0.21) * v; A.bounce = -Math.abs(Math.sin(d * 0.21)) * 1.5 * v;
+      cur.pose = 13; cur.wk = (show.d0 - d) * 0.13; cur.note = t;
+      return;
+    }
+    k = t - R; x0 = p.tx - TOW * s;
+    // he lets go: the handle zips in, the trunk drops onto both wheels, rocks and settles; the brake gives it a jolt
+    A.hdl = Math.max(0, 1 - k / 0.16); A.hx = -18; A.hy = -10; cur.grip = 2;
+    A.spin = Math.max(0, 1 - k / 0.3);
+    if (k < 0.16) A.rock = -0.15 * Math.cos(k / 0.16 * Math.PI / 2);
+    else if (k < 0.36) A.rock = 0.045 * Math.sin((k - 0.16) / 0.2 * Math.PI);
+    g = k - 0.16; if (g > 0 && g < 0.6) A.sq = 0.075 * Math.sin(g * 24) * Math.exp(-g * 8);
+    g = t - show.tP; if (g > 0 && g < 0.4) A.sq += 0.035 * Math.sin(g * 30) * Math.exp(-g * 12);
+    if (t < show.tO) {
+      if (k >= 0.45) { cur.x = p.x; cur.face = 1; cur.pose = 11; cur.k = (k - 0.45) / 0.25; cur.hop = 4 * Math.sin(Math.PI * Math.min(1, cur.k / 0.5)); }
+      else if (k >= 0.2) { cur.x = SS.lerp(x0, p.x, SS.ease.inOutSine((k - 0.2) / 0.25)); cur.face = 1; cur.pose = 8; cur.wk = Math.abs(cur.x - x0) / s * 0.13; }
+      else { cur.x = x0; cur.pose = 0; cur.face = k < 0.08 ? -1 : -Math.cos(Math.PI * (k - 0.08) / 0.12); }
+      return;
+    }
+    // open up: the lid swings past upright and settles, the bar rises, the awning unrolls
+    g = t - show.tO; cur.face = 1; cur.pose = t >= show.tS ? 12 : 3;
+    u = SS.clamp((g - 0.04) / 0.55, 0, 1); A.lid = u >= 1 ? 1 : 1 - (1 - u) * (1 - u) * Math.cos(8.6 * u);
+    A.bar = SS.ease.outBack(SS.clamp((g - 0.12) / 0.26, 0, 1));
+    A.awn = SS.ease.outCubic(SS.clamp((g - 0.3) / 0.38, 0, 1));
+    for (i = 0; i < n; i++) {                              // bottles spring up one at a time
+      b = t - (show.tO + 0.42 + i * 0.17);
+      if (b <= 0) continue;
+      k = Math.min(1, b / 0.36); A.bk[i] = k >= 1 ? 1 : 1 - (1 - k) * (1 - k) * (1 - k) * Math.cos(k * 11);
+      v = Math.max(0, 1 - b / 0.5); A.fl[i] = v * v;
+    }
+    g = t - show.tS;
+    if (g <= 0) return;
+    // the pole shoots up, the sign drops in on its chains and swings, the bulbs light one by one, the neon buzzes on
+    A.pole = SS.clamp(g / 0.3, 0, 1);
+    v = SS.clamp((g - 0.22) / 0.34, 0, 1); A.fold = v >= 1 ? 1 : 1 - Math.pow(1 - v, 4) * Math.cos(9 * v);
+    d = g - 0.3; A.sway = d > 0 ? 0.2 * Math.sin(d * 12) * Math.exp(-d * 7) : 0;
+    A.bulbs = Math.max(0, (g - 0.34) / 0.02);
+    A.neon = SS.clamp((g - 0.6) / 0.22, 0, 1);
+  }
+  function placeOut(p, n) {
+    var s = p.s, t = show.t, i, b, c, u, d, w, tg = p.tx - PUSH * s;
+    A.bulbs = Math.max(0, 16 * (1 - t / 0.15)); A.neon = t < 0.06 ? 1 : 0;
+    c = SS.clamp((t - 0.06) / 0.22, 0, 1); A.fold = 1 - c * c; A.sway = -0.12 * Math.sin(Math.PI * c);
+    A.pole = 1 - SS.smooth((t - 0.24) / 0.22);
+    for (i = 0; i < n; i++) { b = SS.clamp((t - 0.28 - i * 0.045) / 0.16, 0, 1); A.bk[i] = Math.max(0, 1 - (2.70158 * b - 1.70158) * b * b); }
+    c = SS.clamp((t - 0.42) / 0.24, 0, 1); A.awn = 1 - c * c;
+    A.bar = 1 - SS.smooth((t - 0.62) / 0.14);
+    c = SS.clamp((t - 0.6) / 0.24, 0, 1); A.lid = 1 - c * c;
+    w = t - 0.84; if (w > 0 && w < 0.5) A.sq = 0.06 * Math.sin(w * 26) * Math.exp(-w * 10);   // the lid slams shut
+    A.hdl = SS.smooth((t - 0.8) / 0.14); A.hx = -10; A.hy = -5; cur.grip = 2;
+    if (t < 0.68) { cur.pose = 0; return; }
+    if (t < 0.8) { cur.pose = 0; cur.face = -Math.cos(Math.PI * (t - 0.68) / 0.12); return; }
+    cur.face = 1;
+    if (t < show.po) { cur.x = SS.lerp(p.x, tg, SS.ease.inOutSine((t - 0.8) / (show.po - 0.8))); cur.pose = 8; cur.wk = Math.abs(cur.x - p.x) / s * 0.13; return; }
+    // and off he goes, pushing, faster and faster
+    u = SS.clamp((t - show.po) / show.dur, 0, 1); d = show.d1 * u * u;
+    cur.tx = p.tx + d * s; cur.x = cur.tx - PUSH * s; cur.pose = 7; cur.wk = d * 0.13; cur.grip = 1;
+    A.wheel = d / 7.5; A.spin = Math.min(1, u * 5); A.bounce = -Math.abs(Math.sin(d * 0.21)) * 1.4 * Math.min(1, u * 3); A.rock = 0.02 * Math.sin(d * 0.21);
+  }
+  /** screen point of the hand on the trunk's handle (same maths as dexRig's arm) -> G */
+  function gripAt(c, env) {
+    var g = GRIP[c.pose] || GRIP[7], bob = c.wk != null ? Math.abs(Math.cos(c.wk)) * 2.2 : 0, br = Math.sin(env.t * 2.2) * (env.reduced ? 0.6 : 1.3);
+    var hip = -0.44 * 116 - bob, y = -0.77 * 116 - br - bob + g.y - hip, cs = Math.cos(g.lean), sn = Math.sin(g.lean);
+    G.x = c.x + c.face * c.s * (g.x * cs - y * sn); G.y = c.y - c.hop * c.s + c.s * (hip + g.x * sn + y * cs);
+  }
+  /** screen point where the handle meets the trunk's left side, through the trunk's tilt and squash -> G2 */
+  function attachAt(c) {
+    var px = -34 * (1 + A.sq), py = -60 * (1 - A.sq), pv = A.rock < 0 ? -21 : 21, cs = Math.cos(A.rock), sn = Math.sin(A.rock), rx = px - pv;
+    G2.x = c.tx + c.s * (pv + rx * cs - py * sn); G2.y = c.y + c.s * (A.bounce + rx * sn + py * cs);
+  }
+  /** the chrome handle he tows and pushes the trunk by; it slides out of the trunk's side and back in */
+  function towBar(ctx, c, env) {
+    var s = c.s, ex, ey;
+    attachAt(c);
+    if (c.grip === 1) { gripAt(c, env); ex = G.x; ey = G.y; } else { ex = G2.x + A.hx * A.hdl * s; ey = G2.y + A.hy * A.hdl * s; }
+    ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(G2.x, G2.y); ctx.lineTo(ex, ey);
+    ctx.strokeStyle = INK; ctx.lineWidth = 5.5 * s; ctx.stroke(); ctx.strokeStyle = '#c9cde6'; ctx.lineWidth = 2.4 * s; ctx.stroke();
+    ctx.beginPath(); ctx.arc(ex, ey, 3.4 * s, 0, TAU); ctx.fillStyle = '#2b2a4a'; ctx.fill(); ctx.strokeStyle = INK; ctx.lineWidth = 2 * s; ctx.stroke();
+  }
+  /** a whistled note: white with an ink rim, like the ones the FX use */
+  function noteGlyph(ctx, x, y, r) {
+    ctx.beginPath(); ctx.moveTo(x + 3 * r, y); ctx.lineTo(x + 3 * r, y - 11 * r); ctx.quadraticCurveTo(x + 8 * r, y - 9.5 * r, x + 7.5 * r, y - 4.5 * r);
+    ctx.strokeStyle = INK; ctx.lineWidth = 4.6 * r; ctx.stroke(); ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2 * r; ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(x, y, 4 * r, 3.1 * r, -0.4, 0, TAU); ctx.fillStyle = '#ffffff'; ctx.fill(); ctx.strokeStyle = INK; ctx.lineWidth = 2 * r; ctx.stroke();
+  }
+  /** he whistles while he walks: notes float up from his lips and drift behind him */
+  function whistle(ctx, c, t) {
+    var s = c.s, i, u, a, w = t - 0.1;
+    if (w <= 0) return;
+    ctx.save(); ctx.lineCap = 'round';
+    for (i = 0; i < 2; i++) {
+      if (w < i * 0.45) continue;
+      u = (w * 1.1 + i * 0.5) % 1; a = Math.sin(Math.PI * u);
+      ctx.globalAlpha = Math.min(1, a * 1.8);
+      noteGlyph(ctx, c.x + c.face * (16 - 24 * u) * s + Math.sin(u * 9 + i * 2) * 2.5 * s, c.y - (100 + 34 * u) * s, s * (0.7 + 0.3 * u));
+    }
+    ctx.restore();
   }
   function drawDealer(ctx, view, env, st) {
-    var p = spot, s = p.s, t = env.t, red = env.reduced, T = 7.2, ph = ((t % T) + T) % T, pose = 0, k = 0, face = -1, hop = 0, e, u;
-    shadow(ctx, p.tx, p.y + s, 44, s);
-    ctx.save(); ctx.translate(p.tx, p.y); ctx.scale(s, s); trunkBody(ctx, env, st); trunkTop(ctx, env, p, true); ctx.restore();
-    if (dex.sold) pose = 5;                                 // nothing left to sell: he kicks back
-    else if (ph < 1.4) { pose = 1; k = ph / 1.4; }
-    else if (ph >= 3 && ph < 4.1) { pose = 2; k = (ph - 3) / 1.1; }
-    else if (ph >= 5.5 && ph < 6.7) { pose = 3; k = (ph - 5.5) / 1.2; face = -1 + 2 * SS.smooth(Math.min(k, 1 - k) / 0.12); }
-    if (lookT > 0 && SS.state && SS.state.phase === 'day') { pose = 6; k = 1 - lookT / 1.3; face = -1; }   // a sale: he turns to the customer
-    if (dealT > 0) {                                        // you bought something: a spin, then two thumbs up
-      e = 1 - dealT / 1.5; pose = 4; k = e; face = -1;
-      if (!red && e < 0.34) { u = e / 0.34; face = -Math.cos(u * TAU); hop = Math.sin(u * Math.PI) * 14; pose = 0; }
+    var c = cur, s = c.s, t = env.t, red = env.reduced, T = 7.2, ph = (((t - idle0) % T) + T) % T, pose = 0, k = 0, face = -1, hop = 0, wk = null, e, u, pv;
+    shadow(ctx, c.tx, c.y + s, 44, s);
+    ctx.save(); ctx.translate(c.tx, c.y + A.bounce * s); ctx.scale(s, s);
+    if (A.rock) { pv = A.rock < 0 ? -21 : 21; ctx.translate(pv, 0); ctx.rotate(A.rock); ctx.translate(-pv, 0); }
+    if (A.sq) ctx.scale(1 + A.sq, 1 - A.sq);
+    trunkBody(ctx, env, st); trunkTop(ctx, env, spot, true); ctx.restore();
+    if (A.hdl > 0.02) towBar(ctx, c, env);
+    if (c.pose >= 0) { pose = c.pose; k = c.k; face = c.face; hop = red ? 0 : c.hop; wk = c.wk; }
+    else {
+      if (dex.sold) pose = 5;                               // nothing left to sell: he kicks back
+      else if (ph < 1.4) { pose = 1; k = ph / 1.4; }
+      else if (ph >= 3 && ph < 4.1) { pose = 2; k = (ph - 3) / 1.1; }
+      else if (ph >= 5.5 && ph < 6.7) { pose = 3; k = (ph - 5.5) / 1.2; face = -1 + 2 * SS.smooth(Math.min(k, 1 - k) / 0.12); }
+      if (show.tada < TADA && !red) {                       // all set up: a spin to face you, ta-da, then finger guns
+        u = show.tada;
+        if (u < 0.42) { e = u / 0.42; face = Math.cos(Math.PI * 3 * e); hop = Math.sin(Math.PI * e) * 12; pose = 9; k = e * 0.1; }
+        else if (u < 0.95) { pose = 9; k = 0.1 + (u - 0.42) / 0.53 * 0.9; face = -1; }
+        else { pose = 10; k = (u - 0.95) / (TADA - 0.95); face = -1; }
+      }
+      if (lookT > 0 && SS.state && SS.state.phase === 'day') { pose = 6; k = 1 - lookT / 1.3; face = -1; }   // a sale: he turns to the customer
+      if (dealT > 0) {                                      // you bought something: a spin, then two thumbs up
+        e = 1 - dealT / 1.5; pose = 4; k = e; face = -1; hop = 0;
+        if (!red && e < 0.34) { u = e / 0.34; face = -Math.cos(u * TAU); hop = Math.sin(u * Math.PI) * 14; pose = 0; }
+      }
     }
     if (Math.abs(face) < 0.08) face = face < 0 ? -0.08 : 0.08;
-    shadow(ctx, p.x, p.y, 24, s * (1 - hop / 50));
-    ctx.save(); ctx.translate(p.x, p.y - hop * s); ctx.scale(s * face, s); dexRig(ctx, env, pose, k); ctx.restore();
+    shadow(ctx, c.x, c.y, 24, s * (1 - hop / 50));
+    ctx.save(); ctx.translate(c.x, c.y - hop * s); ctx.scale(s * face, s); dexRig(ctx, env, pose, k, wk); ctx.restore();
+    if (c.note >= 0 && !red) whistle(ctx, c, c.note);
   }
 
   SS.Actors = {
-    update: function (dt) {
+    update: function (dt, view, env) {
       tapT = Math.max(0, tapT - dt); bellT = Math.max(0, bellT - dt); cheerT = Math.max(0, cheerT - dt);
-      dealT = Math.max(0, dealT - dt); lookT = Math.max(0, lookT - dt); lookCD -= dt; limT = dex.on && dex.lim ? limT + dt : 0;
+      dealT = Math.max(0, dealT - dt); lookT = Math.max(0, lookT - dt); lookCD -= dt;
       for (var id in glowT) if (glowT[id] > 0) glowT[id] = Math.max(0, glowT[id] - dt);
+      if (view && view.toX && env) showStep(dt, view, env);
+      if (show.mode === SET) limT = dex.on && dex.lim ? limT + dt : 0;
     },
     draw: function (ctx, view, env) {
       var st = SS.state, today = st && st.today, list = today && today.customers ? today.customers.slice() : [];
-      var fl = DATA.byId(DATA.flavors, (st && st.flavor) || 'classic') || DATA.flavors[0], on = dexOn(st), dl = 1e9, n = list.length, i = 0;
+      var fl = DATA.byId(DATA.flavors, (st && st.flavor) || 'classic') || DATA.flavors[0], on = show.mode !== AWAY, dl = 1e9, n = list.length, i = 0;
       list.sort(function (a, b) { return a.lane - b.lane; });
-      if (on) { dexLayout(view); dl = (spot.x - 26 * spot.s - view.toX(W.STAND_X)) / view.laneScale(W.STAND_LANE); }
+      if (on) { place(view); dl = (spot.x - 26 * spot.s - view.toX(W.STAND_X)) / view.laneScale(W.STAND_LANE); }
       for (; i < n && list[i].lane < W.STAND_LANE; i++) drawCustomer(ctx, view, env, list[i], fl.color);
       drawStand(ctx, view, env, st, dl);
       for (; i < n && list[i].lane < W.DEALER_LANE; i++) drawCustomer(ctx, view, env, list[i], fl.color);
@@ -645,9 +983,9 @@
       if (today && today.tips && today.tips.length) drawTips(ctx, view, env, today.tips);
       lineMarks(view, list, today, st);
       for (i = 0; i < n; i++) drawOverhead(ctx, view, env, list[i], st, today);
-      if (on) { ctx.save(); ctx.translate(spot.tx, spot.y); ctx.scale(spot.s, spot.s); trunkTop(ctx, env, spot); ctx.restore(); }   // his sign reads over the walkers and their bubbles
+      if (on) { ctx.save(); ctx.translate(cur.tx, cur.y); ctx.scale(spot.s, spot.s); trunkTop(ctx, env, spot); ctx.restore(); }   // his sign reads over the walkers and their bubbles
     },
-    /** screen-space hit test: tips first (generous), then Dex and his trunk, then the stand */
+    /** screen-space hit test: tips first (generous), then Dex and his trunk (once he is set up), then the stand */
     hit: function (sx, sy) {
       var st = SS.state, today = st && st.today, view = SS.view, i, p, s;
       if (!st || !view) return null;
@@ -657,7 +995,7 @@
         var dx = sx - view.toX(t.x), dy = sy - (view.laneY(t.lane) - 12 * view.laneScale(t.lane));
         if (dx * dx + dy * dy <= r * r) return { type: 'tip', id: t.id };
       }
-      if (dexOn(st)) {
+      if (dexOn(st) && show.mode === SET) {
         p = dexLayout(view); s = p.s;
         if (sx >= Math.min(p.x - 34 * s, p.tx + (p.dx - 46) * s) && sx <= Math.max(p.x + 30 * s, p.tx + 46 * s) &&
           sy <= p.y + 14 && sy >= p.y - (150 + p.lift + (dex.lim && !dex.sold ? 48 : 0)) * s) return { type: 'dealer' };
@@ -667,12 +1005,24 @@
       if (Math.abs(sx - x) <= 104 * s && sy <= y + 6 && sy >= y - 220 * s) return { type: 'stand' };
       return null;
     },
-    /** Dex's feet and height in screen px (tx, ty: his trunk), or null when he is not around */
+    /** where Dex's feet (x, y), height (h), trunk (tx, ty) and sign (sx, sy) are drawn right now in screen px; null when he is not in the scene */
     dealerPos: function () {
-      var view = SS.view;
-      if (!view || !view.toX || !dexOn(SS.state)) return null;
-      var p = dexLayout(view);
-      return { x: p.x, y: p.y, h: 120 * p.s, tx: p.tx, ty: p.y - 60 * p.s };
+      var view = SS.view, c;
+      if (!view || !view.toX || show.mode === AWAY) return null;
+      c = place(view);
+      return { x: c.x, y: c.y, h: 120 * c.s, tx: c.tx, ty: c.y - 60 * c.s, sx: c.tx + spot.dx * c.s, sy: c.y - (116 + spot.lift + (spot.lift > 0 ? 15.5 : 11)) * c.s };
+    },
+    /** true once Dex is set up today (after 'dealer:setup' 'ready'); false while he is away or mid-show */
+    dealerReady: function () { return show.mode === SET && dexOn(SS.state); },
+    /** debug.js: play his entrance ('arrive') or his exit ('leave') right now */
+    replay: function (kind) {
+      var view = SS.view, st = SS.state, ph = st ? st.phase : '';
+      if (!view || !view.toX) return;
+      dex.at = -1e9;
+      if (kind === 'leave') { if (show.mode === IN || show.mode === SET) { begin(OUT, ph, view, 0); fire(); show.hold = true; } return; }
+      show.hold = false;
+      if (show.mode !== AWAY) away();
+      if (dexOn(st)) begin(IN, ph, view, 0);
     }
   };
 })();

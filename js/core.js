@@ -187,16 +187,18 @@
    *   'dealer:buy'       {id, kind, cost}      kind 'boost' | 'limited'
    *   'boost:on'         {id}                  a boost became active (bought, or carried into the day)
    * Actors -> everyone (Dex's show; purely visual, the sim never listens)
-   *   'dealer:setup'     {step, i?}            Dex setting up / packing up in the scene, in this order:
+   *   'dealer:setup'     {step, i?, quiet?}    Dex setting up / packing up in the scene, in this order:
    *       'arrive'  he starts rolling his trunk in from off the right edge (morning prep on a day he visits)
    *       'park'    he reaches his spot and kicks the wheel brake
    *       'open'    the trunk lid swings open
    *       'bottle'  one bottle pops up onto the display, i = 0.. in offer order
    *       'sign'    the pole shoots up and the DEX'S DEALS sign drops in on its chains
    *       'ready'   fully set up: tappable, Deals button may show, banners and tips may run
-   *       'leave'   closing time: he packs up and rolls off to the right
+   *       'leave'   closing time: he packs up and rolls off to the right (in the day's last seconds; at 'results' if he could not)
    *       'gone'    off screen
-   *     Reduced motion, or a frame where he is already set up (e.g. loading into phase 'day'), skips straight to 'ready'.
+   *     Reduced motion goes from 'arrive' straight to 'ready' in the same frame. 'ready' listeners already see dealerReady()
+   *     true and his parked dealerPos(). quiet: true = he snapped in or out with no show (loading into phase 'day', opening
+   *     for business mid-show, the game moving on): 'ready', or 'leave' then 'gone', with no fanfare.
    * UI -> everyone
    *   'pause'            {paused}
    *   'ui:open' / 'ui:close' {name}
@@ -579,7 +581,7 @@
    * }
    *
    * SS.Actors.hit(sx, sy) -> null | {type:'tip', id} | {type:'dealer'} | {type:'stand'}   // screen-space hit test, in that priority
-   *   ('dealer' only once he has parked: not while he is still rolling in, not while packing up)
+   *   ('dealer' only once he is set up, from 'ready': not while he is rolling in or setting up, not while packing up)
    * SS.Actors.dealerPos() -> null | {x, y, h, tx, ty}   where Dex and his trunk are drawn right now (moves during his entrance/exit)
    * SS.Actors.dealerReady() -> bool   true once Dex is fully set up today (after 'dealer:setup' 'ready'); false while absent or mid-show
    *

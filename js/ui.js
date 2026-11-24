@@ -740,17 +740,20 @@
     else if (b) toast(b.name + ' is on for today', 'good', b.icon);
   }
   /* Dex visits some mornings and sets up in the scene first ('dealer:setup' steps). His tip, banner and hello
-   * wait for 'ready' so they never cover the show, and never longer than DEX_WAIT after the morning began. */
+   * wait for 'ready' so they never cover the show, and never longer than DEX_WAIT after the morning began, counted on
+   * the scene's clock: it stops with the frames (hidden tab, slow phone) just as his show does. */
   var DEX_WAIT = 6000, dexDay = 0, dexTimer = 0;
+  function sceneMs() { return SS.env ? SS.env.t * 1000 : Date.now(); }
   function dexSetUp() {
     var A = SS.Actors;
     if (!A || typeof A.dealerReady !== 'function') return true;       // an actors.js without his show: he is simply there
     try { return !!A.dealerReady(); } catch (e) { return true; }
   }
   function dexWait() {                                     // on phase 'prep'; 650 ms first lets the morning news land
+    var t0 = sceneMs();
     clearTimeout(dexTimer);
-    dexTimer = setTimeout(function () {
-      if (dexSetUp()) onDexReady(); else dexTimer = setTimeout(onDexReady, DEX_WAIT - 650);
+    dexTimer = setTimeout(function look() {
+      if (dexSetUp() || sceneMs() - t0 >= DEX_WAIT) onDexReady(); else dexTimer = setTimeout(look, 250);
     }, 650);
   }
   /** once a morning, when Dex is set up: his first-visit tip, then his news */
@@ -760,7 +763,7 @@
     if (!s || phase !== 'prep' || dexDay === s.seed + '/' + s.day || !dexHere()) return;
     dexDay = s.seed + '/' + s.day;                         // per game and day: a new game meets him afresh
     var first = !!t && !t.dex;
-    if (first) tutBegin('prep', DEX_TIP, 900);           // the first morning Dex turns up (after his button has landed)
+    if (first) tutBegin('prep', DEX_TIP, 1700);          // the first morning Dex turns up (after his bow, once his button has landed)
     dexMorning(first);
   }
   /** a limited edition gets a banner; any other visit a short hello (the first one is the tip's job) */
@@ -769,7 +772,7 @@
     if (!info || !info.present || !Array.isArray(info.offers)) return;
     info.offers.forEach(function (o) { if (o.kind === 'limited' && !o.sold) lim = o; });
     if (lim) banner({ icon: 'dealer', label: 'Dex has a limited edition today', title: lim.name, desc: 'Only from Dex. Tap Deals to see it.', kind: 'dex' });
-    else if (!first) toast('Dex rolled into town today. Tap Deals to see his boosts.', 'info', 'dealer');
+    else if (!first) toast('Dex rolled into town today with fresh boosts.', 'info', 'dealer');
   }
 
   /* ------------------------------------------------------------------ *

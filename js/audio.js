@@ -8,6 +8,7 @@
  *                       names: click tick open close error tally whoosh coin tip ting pour squeeze squish ding bell
  *                              pop hm grumble chirp low trombone fanfare win chaching jingle chime thunder spend blip
  *                              welcome streak crack shield farewell loyal powerup
+ *                              dexroll brake latch plink neon tada rolloff (Dex setting up: 'dealer:setup')
  * }
  * Listens to the bus by itself (sales, bells, weather, phases, settings, pause) and runs the
  * generative music and the location / weather ambience on a lookahead scheduler.
@@ -323,13 +324,58 @@
       tone(m, d, 'sine', 440 * v, t, 0.3, 0.16, { to: 1760 * v, glide: 0.26 });
       hiss(m, d, 'bandpass', 600, t, 0.3, 0.1, { to: 5000, q: 1.5, a: 0.1 });
       tone(m, d, 'sine', 1760 * v, t + 0.27, 0.25, 0.12);
+    },
+    // Dex the Dealer setting up his stall
+    dexroll: function (m, d, t, v) {                    // wheels rumbling over the slabs, slowing down, and a little whistled tune
+      var i, at, f, W = [[0.3, 84, 0.11], [0.43, 81, 0.11], [0.56, 84, 0.11], [0.69, 89, 0.3]];
+      hiss(m, d, 'lowpass', 230, t, 1.35, 0.55, { to: 110, a: 0.15, hold: 0.6 });
+      hiss(m, d, 'bandpass', 650, t, 1.2, 0.05, { q: 1.4, a: 0.15, hold: 0.5 });
+      for (i = 0, at = t + 0.08; i < 6; i++, at += 0.13 + i * 0.035) tone(m, d, 'triangle', (150 + rnd() * 30) * v, at, 0.06, 0.15 * (1 - i / 9), { to: 70, a: 0.003 });
+      for (i = 0; i < W.length; i++) { f = mtof(W[i][1]) * v; tone(m, d, 'sine', f, t + W[i][0], W[i][2], 0.1, { a: 0.025, hold: W[i][2] * 0.4, vib: [6, f * 0.012] }); }
+    },
+    brake: function (m, d, t, v) {                      // a heel on the wheel brake: clunk and a metal click
+      tone(m, d, 'sine', 150 * v, t, 0.16, 0.45, { to: 55, glide: 0.1, a: 0.003 });
+      hiss(m, d, 'bandpass', 1800 * v, t, 0.05, 0.3, { q: 4 });
+      tone(m, d, 'square', 2200 * v, t + 0.01, 0.02, 0.05, { a: 0.001 });
+    },
+    latch: function (m, d, t, v) {                      // the clasp clacks open, the lid creaks up
+      hiss(m, d, 'bandpass', 2600 * v, t, 0.025, 0.45, { q: 5 });
+      hiss(m, d, 'bandpass', 3400 * v, t + 0.06, 0.02, 0.35, { q: 5 });
+      tone(m, d, 'sawtooth', 170 * v, t + 0.08, 0.34, 0.08, { to: 260 * v, a: 0.04, flt: ['bandpass', 700, 5], vib: [22, 14] });
+    },
+    plink: function (m, d, t, v, o) {                   // a bottle pops up; each one a step higher
+      var f = mtof(KEY + 24 + [0, 2, 4, 7, 9, 12, 14][clamp(o.i | 0, 0, 6)]) * v;
+      tone(m, d, 'sine', f * 0.5, t, 0.06, 0.16, { to: f, glide: 0.05 });
+      pluck(m, d, f, t + 0.03, 0.22, 0.17);
+      tone(m, d, 'sine', f * 3, t + 0.03, 0.1, 0.03);
+    },
+    neon: function (m, d, t, v) {                       // the pole goes up with a chain rattle, the sign thunks in, the neon buzzes on: ding
+      for (var i = 0; i < 7; i++) tone(m, d, 'sine', 2600 + rnd() * 2600, t + i * 0.035 + rnd() * 0.01, 0.025, 0.045, { a: 0.002 });
+      tone(m, d, 'sine', 130 * v, t + 0.3, 0.16, 0.38, { to: 70, glide: 0.1, a: 0.003 });
+      hiss(m, d, 'lowpass', 700, t + 0.3, 0.07, 0.25);
+      tone(m, d, 'sawtooth', 118, t + 0.6, 0.18, 0.06, { flt: ['bandpass', 1400, 3], a: 0.005, hold: 0.12 });
+      bell(m, d, t + 0.82, 1568 * v, 0.5, 0.14);
+    },
+    tada: function (m, d, t, v) {                       // ta-da!
+      pluck(m, d, 698 * v, t, 0.14, 0.2);
+      pluck(m, d, 880 * v, t + 0.07, 0.14, 0.2);
+      [1047, 1397, 1760].forEach(function (f) { pluck(m, d, f * v, t + 0.16, 0.55, 0.14); });
+      brass(m, d, 698 * v, t + 0.16, 0.32, 0.08);
+      sparkle(m, d, t + 0.22, 4, 0.3, 0.04);
+    },
+    rolloff: function (m, d, t, v) {                    // packs away (the lid shuts), then the wheels rumble off into the distance
+      hiss(m, d, 'bandpass', 900, t + 0.05, 0.22, 0.1, { to: 2400, q: 1, a: 0.05 });
+      hiss(m, d, 'bandpass', 2400 * v, t + 0.84, 0.03, 0.4, { q: 5 });
+      tone(m, d, 'sine', 120, t + 0.84, 0.12, 0.3, { to: 60, glide: 0.08 });
+      hiss(m, d, 'lowpass', 220, t + 1.02, 1.3, 0.5, { to: 90, a: 0.12 });
+      for (var i = 0, at = t + 1.08; i < 6; i++, at += Math.max(0.06, 0.2 - i * 0.03)) tone(m, d, 'triangle', (150 + rnd() * 30) * v, at, 0.06, 0.14 * (1 - i / 7), { to: 70, a: 0.003 });
     }
   };
-  var LEVEL = { welcome: 0.7, farewell: 0.6, pour: 0.7, error: 0.6, bell: 0.7, ding: 0.85, trombone: 0.62, fanfare: 0.7, win: 0.7, chaching: 0.9, chime: 0.75, thunder: 0.75, grumble: 0.8, low: 0.75, hm: 0.6 };                                                                  // per-effect trim, tuned from the offline loudness table
-  var VAR = { streak: 0, welcome: 0.02, trombone: 0, fanfare: 0, win: 0, chaching: 0, jingle: 0, chime: 0, bell: 0, thunder: 0, coin: 0.02, tally: 0.02, pop: 0.14, hm: 0.16, grumble: 0.14 };   // random pitch spread (default 0.05)
+  var LEVEL = { latch: 2.2, tada: 0.8, neon: 0.85, welcome: 0.7, farewell: 0.6, pour: 0.7, error: 0.6, bell: 0.7, ding: 0.85, trombone: 0.62, fanfare: 0.7, win: 0.7, chaching: 0.9, chime: 0.75, thunder: 0.75, grumble: 0.8, low: 0.75, hm: 0.6 };                                                                  // per-effect trim, tuned from the offline loudness table
+  var VAR = { plink: 0, tada: 0, neon: 0.02, streak: 0, welcome: 0.02, trombone: 0, fanfare: 0, win: 0, chaching: 0, jingle: 0, chime: 0, bell: 0, thunder: 0, coin: 0.02, tally: 0.02, pop: 0.14, hm: 0.16, grumble: 0.14 };   // random pitch spread (default 0.05)
   var GAP = { tick: 0.03, tally: 0.035, pop: 0.09, hm: 0.7, grumble: 0.35, chirp: 0.8, low: 0.8, coin: 0.06, tip: 0.07, ting: 0.1, squish: 0.07, blip: 0.2, whoosh: 0.15, pour: 0.12, spend: 0.15, thunder: 2, welcome: 0.3, streak: 0.15, crack: 0.25, shield: 0.3, farewell: 0.6, loyal: 0.08, powerup: 0.25 };   // min seconds between repeats (default 0.04)
-  var ECHO = { welcome: 1, streak: 1, shield: 1, bell: 1, chime: 1, fanfare: 1, win: 1, ding: 1, chaching: 1, jingle: 1, tip: 1, ting: 1 };
-  var DUCK = { fanfare: 1.3, win: 3.4, jingle: 0.9, chime: 1.1, trombone: 1.5, chaching: 0.5 };   // seconds the music steps back
+  var ECHO = { tada: 1, neon: 1, welcome: 1, streak: 1, shield: 1, bell: 1, chime: 1, fanfare: 1, win: 1, ding: 1, chaching: 1, jingle: 1, tip: 1, ting: 1 };
+  var DUCK = { tada: 0.6, fanfare: 1.3, win: 3.4, jingle: 0.9, chime: 1.1, trombone: 1.5, chaching: 0.5 };   // seconds the music steps back
 
   /** Build one effect at time t. Shared by play() and the offline tests. */
   function fire(m, name, t, o) {
@@ -726,6 +772,17 @@
   say('loyalty', 'loyal', { delay: 0.1 });             // just after the sale's coin
   on('dealer:buy', function () { lastDeal = ctx ? ctx.currentTime : 0; play('chaching'); });
   on('boost:on', function () { play('powerup', { delay: ctx && ctx.currentTime - lastDeal < 0.2 ? 0.3 : 0 }); });   // after the ka-ching
+  on('dealer:setup', function (p) {                     // Dex's show; snapped into place (quiet) has no sound
+    if (p.quiet) return;
+    var red = SS.reduced && SS.reduced();
+    if (p.step === 'arrive') { if (!red) play('dexroll'); }
+    else if (p.step === 'park') play('brake');
+    else if (p.step === 'open') play('latch');
+    else if (p.step === 'bottle') play('plink', { i: p.i });
+    else if (p.step === 'sign') play('neon');
+    else if (p.step === 'ready') play('tada');
+    else if (p.step === 'leave' && !red) play('rolloff');
+  });
   on('toast', function (p) { play('blip', { kind: p.kind }); });
   on('phase', function (p) {
     if (!MOODS[p.to] || p.to === mood) return;

@@ -42,10 +42,12 @@
   function kindName(k) { return D.kinds[k] ? D.kinds[k].name : 'Customer'; }
   function hasLimited(d) { return !!d && d.present && d.offers.some(function (o) { return o.kind === 'limited' && !o.sold; }); }
   var DEX_WAIT = 6000;    // ms: his Deals button never waits on his entrance longer than this
-  /** Dex has finished setting up in the scene (or actors.js cannot say, or his show is running too long) */
+  /** ms on the scene's clock: it stops with the frames (hidden tab, slow phone) just as his show does */
+  function sceneMs() { return SS.env ? SS.env.t * 1000 : Date.now(); }
+  /** Dex has finished setting up in the scene (his 'ready' came, or actors.js cannot say, or his show is running too long) */
   function dexSetUp() {
     var A = SS.Actors;
-    if (!A || typeof A.dealerReady !== 'function' || (prep && Date.now() - prep.t0 >= DEX_WAIT)) return true;
+    if (!A || typeof A.dealerReady !== 'function' || (prep && sceneMs() - prep.t0 >= DEX_WAIT)) return true;
     try { return !!A.dealerReady(); } catch (e) { return true; }
   }
   /** a boost's icon on a disc of its own colour */
@@ -157,7 +159,7 @@
 
   function buildPrep(st) {
     var S = sim();
-    prep = { st: st, day: st.day, items: {}, rec: {}, flavorKey: '', t0: Date.now() };
+    prep = { st: st, day: st.day, items: {}, rec: {}, flavorKey: '', t0: sceneMs() };
     body.textContent = ''; foot.textContent = '';
 
     /* header */
@@ -275,9 +277,12 @@
 
     patchPrep();
     prep.live = true;                                       // from here on, Dex's button arrives with a flourish
-    setTimeout(onChange, DEX_WAIT + 30);                    // in case his 'ready' never comes
+    dexLate(prep);                                          // in case his 'ready' never comes
     showSheet('dock');
   }
+
+  /** look again every 500 ms until his 'ready' or DEX_WAIT has run on the scene's clock */
+  function dexLate(p) { setTimeout(function () { if (prep !== p) return; if (dexSetUp()) onChange(); else dexLate(p); }, 500); }
 
   function renderFlavors(st) {
     var owned = D.flavors.filter(function (f) { return st.flavors && st.flavors.indexOf(f.id) >= 0; });
@@ -356,7 +361,7 @@
 
   /** the Deals button (with a badge while a limited edition is unsold) and today's boost chips */
   function patchPrepDex(st) {
-    var d = dex(), here = !!(d && d.present), lim = hasLimited(d), show = here && dexSetUp();
+    var d = dex(), here = !!(d && d.present), lim = hasLimited(d), show = here && (!prep.deals.hidden || dexSetUp());   // once in, it stays in
     if (prep.deals.hidden === show) {
       prep.deals.hidden = !show;
       if (show && prep.live) dealsArrive(prep.deals);

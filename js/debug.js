@@ -18,6 +18,8 @@
  *   emit:name        SS.emit(name, {})     fx:confetti | fx:sale | fx:coins
  *   regs:5           give the player 5 regulars with assorted streaks (works with or without 'scene')
  *   dealer           stock Dex the Dealer for today with 3 boosts and a limited flavor
+ *   arrive  leave    replay Dex rolling in and setting up / play him packing up and rolling off (he stays away until
+ *                    the next phase or 'arrive'); in the console: SS.Actors.replay('arrive' | 'leave')
  *   boost:golden     make a boost active
  */
 (function () {
@@ -107,6 +109,7 @@
       case 'cash': st.cash = Number(a); break;
       case 'regs': fakeRegulars(Number(a) || 5); break;
       case 'dealer': fakeDealer(); break;
+      case 'arrive': case 'leave': setTimeout(function () { if (SS.Actors && SS.Actors.replay) SS.Actors.replay(k); }, 60); break;
       case 'boost': st.boosts = st.boosts || []; if (st.boosts.indexOf(a) < 0) st.boosts.push(a); break;
       case 'rep': st.reputation = Number(a); break;
       case 'day': st.day = Number(a); break;
