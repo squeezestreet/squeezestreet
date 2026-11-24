@@ -51,7 +51,10 @@
     // Dex the Dealer
     flyers: 1.35, golden: 1.25, lucky: 2,
     dealerScale: [1, 2, 3.5, 6, 9],                  // boost prices by location, Maple Street .. carnival
-    limitedChance: 0.3, limitedPity: 6               // a limited flavor some days, never more than 6 days apart
+    dexChance: 0.38,      // chance Dex rolls into town on a day from day 3 (day 2 he always comes): about 45% of days with dexGap
+    dexGap: 3,            // never more than this many days in a row without him
+    limitedChance: 0.45,  // chance one of his visits (from day 3) carries a limited flavor: about half of them with limitedGap
+    limitedGap: 3         // never more than this many visits in a row without one
   };
   var OUTCOMES = ['new', 'streak', 'broken', 'saved', 'lost', 'closed', 'away'];
   var BREAKS = ['taste', 'pricey', 'slow', 'wait', 'soldout', 'quit'];
@@ -86,14 +89,15 @@
   /* What Dex the Dealer says, one line a day. {name} = today's limited flavor. */
   var DEX = {
     any: ['Step right up! Fresh deals, today only.', 'Psst. Want a busier day? I can make that happen.',
-      'Everything in the van is one day only. Tomorrow it is gone.', 'Best deals on the street, and I am the only one selling.',
+      'Everything in the trunk is one day only. Tomorrow it is gone.', 'Best deals on the street, and I am the only one selling.',
       'Your stand looks ready for a little extra sparkle.', 'Trust me, friend. These practically sell themselves.',
-      'Fresh from the back of my van. Get them while they last.', 'I have got just the thing for a day like today.',
+      'Fresh from my trunk. Get them while they last.', 'I have got just the thing for a day like today.',
       'Business is good? Let us make it great.', 'Dex\'s deals: tested by me, loved by everyone.',
-      'Pick one, pick two. I will not tell anyone.', 'Big day ahead? Do not go into it empty-handed.'],
-    limited: ['Something rare in the van today: {name}. No shop in town has it.', 'Limited edition, just for you: {name}. Once it is gone, it is gone.',
+      'Pick one, pick two. I will not tell anyone.', 'Big day ahead? Do not go into it empty-handed.',
+      'I am only in town today, so make it count.'],
+    limited: ['Something rare in the trunk today: {name}. No shop in town has it.', 'Limited edition, just for you: {name}. Once it is gone, it is gone.',
       'Shh. I found a crate of {name}. You did not hear it from me.'],
-    sold: ['You cleaned me out! Back tomorrow with fresh stock.', 'Sold out, and proud of it. See you tomorrow, partner.']
+    sold: ['You cleaned me out! I will bring more next time I am in town.', 'Sold out, and proud of it. Catch you next time, partner.']
   };
 
   /* Module state ------------------------------------------------------- */
@@ -1510,12 +1514,23 @@
     }).sort(function (a, b) { return b.streak - a.streak || b.best - a.best || a.since - b.since; });
   }
 
-  /** Does Dex carry a limited flavor today? Pure (seed, day): about limitedChance of days, never more than limitedPity apart. */
-  function limitedDay(seed, day) {
-    if (day < 3) return false;
-    var from = Math.max(3, day - 400), last = from - 3, d;
-    for (d = from; d <= day; d++) if (d - last >= TUNE.limitedPity || dayRng(seed, d, 37)() < TUNE.limitedChance) last = d;
-    return last === day;
+  /** Dex's calendar, pure (seed, day): 0 he stays away, 1 he visits, 2 he visits with a limited flavor.
+   *  Day 1 never, day 2 always (the first meeting), then dexChance / dexGap; a limited flavor on his visits from day 3 by
+   *  limitedChance / limitedGap. Chained from up to 400 days back, like the weather, so the gap rules hold. */
+  var dexMemo = { seed: NaN, at: {} };
+  function dexCalendar(seed, day) {
+    if (!(day >= 2)) return 0;
+    if (dexMemo.seed !== seed) dexMemo = { seed: seed, at: {} };
+    if (dexMemo.at[day] !== undefined) return dexMemo.at[day];
+    var from = Math.max(2, day - 400), last = from, dry = 0, out = 0, d;
+    for (d = from; d <= day; d++) {
+      out = 0;
+      if (d !== 2 && d - last <= TUNE.dexGap && dayRng(seed, d, 53)() >= TUNE.dexChance) continue;
+      last = d; out = 1;
+      if (d < 3) continue;
+      if (dry >= TUNE.limitedGap || dayRng(seed, d, 37)() < TUNE.limitedChance) { dry = 0; out = 2; } else dry++;
+    }
+    return (dexMemo.at[day] = out);
   }
   /** '' or why a boost would do nothing for this player right now */
   function boostUseless(id, st) {
@@ -1525,14 +1540,16 @@
     if (id === 'hype' && st.phase === 'day' && rt && rt.sched && st.regulars.every(function (g) { return !!schedFor(g.id); })) return 'All your regulars are already coming by today.';
     return '';
   }
-  /** Dex restocks once a day, from day 2; a reload never re-rolls today's stock. */
+  /** Dex restocks on the mornings he visits; a reload never changes whether he came or what he brought. */
   function rollDealer(st) {
-    if (st.day < 2) { st.dealer = null; return; }
-    if (st.dealer && st.dealer.day === st.day) return;
+    if (st.day >= 2 && st.dealer && st.dealer.day === st.day) return;
+    var cal = dexCalendar(st.seed, st.day);
+    st.dealer = null;
+    if (!cal) return;
     var r = dayRng(st.seed, st.day, 31), pool = [], offers = [], i;
     D.boosts.forEach(function (b) { if (!boostUseless(b.id, st)) pool.push(b.id); });
     for (i = 0; i < 3 && pool.length; i++) offers.push({ id: pool.splice(Math.floor(r() * pool.length) % pool.length, 1)[0], kind: 'boost', sold: false });
-    if (limitedDay(st.seed, st.day)) {
+    if (cal === 2) {
       var lim = D.flavors.filter(function (f) { return f.limited && st.flavors.indexOf(f.id) < 0; }).sort(function (a, b) { return a.cost - b.cost; });
       var u = r(), k = Math.min(lim.length - 1, u < 0.6 ? 0 : u < 0.88 ? 1 : 2);      // usually the cheapest you do not have yet
       if (lim.length) offers.push({ id: lim[k].id, kind: 'limited', sold: false });
@@ -1549,8 +1566,8 @@
   }
   function dealReason(st, o) {
     if (!dealerHere(st)) return 'Dex is not around right now.';
-    if (st.phase === 'day' && (!rt || rt.closing)) return 'The stand is closing. Dex will be back tomorrow.';
-    if (o.sold) return 'Sold out. Dex will have fresh stock tomorrow.';
+    if (st.phase === 'day' && (!rt || rt.closing)) return 'The stand is closing, and Dex is packing up.';
+    if (o.sold) return 'Sold out. Dex brings fresh stock on his next visit.';
     if (o.kind === 'boost') {
       if (boostOn(o.id)) return 'Already working for you today.';
       var why = boostUseless(o.id, st);
@@ -1581,7 +1598,7 @@
   function buyDeal(id) {
     var st = SS.state, o = null;
     if (!st) return { ok: false, reason: 'Start a game first.' };
-    if (!dealerHere(st)) return { ok: false, reason: st.phase === 'results' ? 'Dex has packed up for the night. He will be back in the morning.' : 'Dex is not around right now.' };
+    if (!dealerHere(st)) return { ok: false, reason: st.phase === 'results' ? 'Dex has packed up for the night.' : st.phase === 'prep' || st.phase === 'day' ? 'Dex is not in town today.' : 'Dex is not around right now.' };
     st.dealer.offers.forEach(function (x) { if (x.id === id) o = x; });
     if (!o) return { ok: false, reason: 'Dex does not have that today.' };
     var why = dealReason(st, o), cost = dealCost(st, o);

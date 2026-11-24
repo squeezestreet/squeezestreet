@@ -579,7 +579,7 @@
     ['sun', 'Watch the weather', 'Hot days bring thirsty crowds who want extra ice. Rain keeps people home, so buy less. The forecast is usually right, not always.'],
     ['bell', 'Work the stand', 'Ring the bell to call people over, tap the stand to mix a batch faster, and tap coins on the ground to pick up tips.'],
     ['newspaper', 'Read the reviews', 'Customers say what bothered them: too sour, too sweet, too warm, too pricey or too slow. Fix that one thing tomorrow.'],
-    ['regular', 'Regulars and Dex', 'Make someone really happy and they may come back as a regular. Every happy visit in a row, they pay a little more. Dex the Dealer sells boosts that last one day, and sometimes a flavor you can\'t get anywhere else.'],
+    ['regular', 'Regulars and Dex', 'Make someone really happy and they may come back as a regular. Every happy visit in a row, they pay a little more. Dex the Dealer rolls into town some mornings with boosts that last one day, and now and then a flavor you can\'t get anywhere else.'],
     ['juicer', 'Upgrade', 'Spend your profit on a bigger pitcher, a faster juicer, shade, signs and new flavors.'],
     ['map', 'Move up', 'More stars unlock busier spots, from the park to the carnival. The rent is higher and so are the takings.']
   ];
@@ -739,17 +739,37 @@
     if (p.kind === 'limited' && f) toast(f.name + ' is yours to keep', 'good', 'drink');
     else if (b) toast(b.name + ' is on for today', 'good', b.icon);
   }
-  var dexBannerDay = 0;
-  /** once a morning: tell the player Dex has something they cannot buy anywhere else */
-  function dexMorning() {
-    var s = SS.state;
-    if (!s || phase !== 'prep' || dexBannerDay === s.day) return;
+  /* Dex visits some mornings and sets up in the scene first ('dealer:setup' steps). His tip, banner and hello
+   * wait for 'ready' so they never cover the show, and never longer than DEX_WAIT after the morning began. */
+  var DEX_WAIT = 6000, dexDay = 0, dexTimer = 0;
+  function dexSetUp() {
+    var A = SS.Actors;
+    if (!A || typeof A.dealerReady !== 'function') return true;       // an actors.js without his show: he is simply there
+    try { return !!A.dealerReady(); } catch (e) { return true; }
+  }
+  function dexWait() {                                     // on phase 'prep'; 650 ms first lets the morning news land
+    clearTimeout(dexTimer);
+    dexTimer = setTimeout(function () {
+      if (dexSetUp()) onDexReady(); else dexTimer = setTimeout(onDexReady, DEX_WAIT - 650);
+    }, 650);
+  }
+  /** once a morning, when Dex is set up: his first-visit tip, then his news */
+  function onDexReady() {
+    var s = SS.state, t = s && s.tutorial;
+    clearTimeout(dexTimer);
+    if (!s || phase !== 'prep' || dexDay === s.seed + '/' + s.day || !dexHere()) return;
+    dexDay = s.seed + '/' + s.day;                         // per game and day: a new game meets him afresh
+    var first = !!t && !t.dex;
+    if (first) tutBegin('prep', DEX_TIP, 900);           // the first morning Dex turns up (after his button has landed)
+    dexMorning(first);
+  }
+  /** a limited edition gets a banner; any other visit a short hello (the first one is the tip's job) */
+  function dexMorning(first) {
     var info = sim('dealerInfo'), lim = null;
     if (!info || !info.present || !Array.isArray(info.offers)) return;
     info.offers.forEach(function (o) { if (o.kind === 'limited' && !o.sold) lim = o; });
-    if (!lim) return;
-    dexBannerDay = s.day;
-    banner({ icon: 'dealer', label: 'Dex has a limited edition today', title: lim.name, desc: 'Only from Dex. Tap Deals to see it.', kind: 'dex' });
+    if (lim) banner({ icon: 'dealer', label: 'Dex has a limited edition today', title: lim.name, desc: 'Only from Dex. Tap Deals to see it.', kind: 'dex' });
+    else if (!first) toast('Dex rolled into town today. Tap Deals to see his boosts.', 'info', 'dealer');
   }
 
   /* ------------------------------------------------------------------ *
@@ -771,7 +791,7 @@
     ]
   };
   var DEX_TIP = [
-    { at: 'deals', once: 'dex', text: 'This is Dex. He sells boosts that last one day, and sometimes a limited-edition flavor you can\'t get anywhere else.' }
+    { at: 'deals', once: 'dex', text: 'This is Dex. He turns up some mornings with boosts that last one day, and sometimes a limited-edition flavor you can\'t get anywhere else.' }
   ];
   var coach = { phase: '', steps: null, i: 0, tries: 0, timer: 0, el: null, ring: null, node: null, bw: 0, bh: 0, side: '', x: 0, y: 0, ax: 0, ay: 0, l: 0, t: 0, w: 0, h: 0 };
 
@@ -800,11 +820,7 @@
   function tutStart(ph) {
     var s = SS.state, t = s && s.tutorial;
     if (t && !t.done && ph === 'prep' && s.day > 1) tutFinish();      // they have been round once: lesson over
-    if (!t || t.done || !TIPS[ph]) {
-      if (ph === 'prep' && t && !t.dex && dexHere()) tutBegin(ph, DEX_TIP, 1100);   // the first morning Dex turns up
-      else tutClear();
-      return;
-    }
+    if (!t || t.done || !TIPS[ph]) { tutClear(); return; }           // Dex's first-visit tip waits for his show (onDexReady)
     tutBegin(ph, TIPS[ph], ph === 'day' ? 1300 : 700);
   }
   function tutBegin(ph, steps, ms) {
@@ -979,7 +995,7 @@
     refreshDeals();
     layoutToasts();
     tutStart(to);
-    if (to === 'prep') setTimeout(dexMorning, 650);          // after the morning news, which lands right after the phase
+    if (to === 'prep') dexWait(); else clearTimeout(dexTimer);
   }
 
   function frame() {
@@ -1021,6 +1037,7 @@
     SS.on('boost:on', refreshDeals);
     SS.on('day:start', refreshDeals);
     SS.on('ui:open', function (p) { if (p && p.name === 'dealer' && tutOn('deals')) tutNext(); });
+    SS.on('dealer:setup', function (p) { if (p && p.step === 'ready') onDexReady(); });
     SS.on('win', function () { setTimeout(openWin, 1100); });
     SS.on('brew:start', function (p) {
       var sp = (SS.state && SS.state.settings && SS.state.settings.speed) || 1;

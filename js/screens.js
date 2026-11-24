@@ -41,6 +41,13 @@
   function boostDef(id) { return (D.boosts && D.byId(D.boosts, id)) || null; }
   function kindName(k) { return D.kinds[k] ? D.kinds[k].name : 'Customer'; }
   function hasLimited(d) { return !!d && d.present && d.offers.some(function (o) { return o.kind === 'limited' && !o.sold; }); }
+  var DEX_WAIT = 6000;    // ms: his Deals button never waits on his entrance longer than this
+  /** Dex has finished setting up in the scene (or actors.js cannot say, or his show is running too long) */
+  function dexSetUp() {
+    var A = SS.Actors;
+    if (!A || typeof A.dealerReady !== 'function' || (prep && Date.now() - prep.t0 >= DEX_WAIT)) return true;
+    try { return !!A.dealerReady(); } catch (e) { return true; }
+  }
   /** a boost's icon on a disc of its own colour */
   function boostDot(b, c) { return h('span', { class: 'boost-dot' + (c ? ' ' + c : ''), style: 'background:' + mixHex(b.color, '#ffffff', 0.45), html: SS.icon(b.icon) }); }
 
@@ -150,7 +157,7 @@
 
   function buildPrep(st) {
     var S = sim();
-    prep = { st: st, day: st.day, items: {}, rec: {}, flavorKey: '' };
+    prep = { st: st, day: st.day, items: {}, rec: {}, flavorKey: '', t0: Date.now() };
     body.textContent = ''; foot.textContent = '';
 
     /* header */
@@ -267,6 +274,8 @@
     foot.append(prep.foot);
 
     patchPrep();
+    prep.live = true;                                       // from here on, Dex's button arrives with a flourish
+    setTimeout(onChange, DEX_WAIT + 30);                    // in case his 'ready' never comes
     showSheet('dock');
   }
 
@@ -347,8 +356,11 @@
 
   /** the Deals button (with a badge while a limited edition is unsold) and today's boost chips */
   function patchPrepDex(st) {
-    var d = dex(), here = !!(d && d.present), lim = hasLimited(d);
-    prep.deals.hidden = !here;
+    var d = dex(), here = !!(d && d.present), lim = hasLimited(d), show = here && dexSetUp();
+    if (prep.deals.hidden === show) {
+      prep.deals.hidden = !show;
+      if (show && prep.live) dealsArrive(prep.deals);
+    }
     cls(prep.deals, 'has-limited', lim);
     prep.deals.setAttribute('aria-label', lim ? 'Dex\'s deals. A limited edition is in today' : 'Dex\'s deals');
     cls(prep.foot, 'has-deals', here);
@@ -361,6 +373,18 @@
       var b = boostDef(id);
       prep.boosts.append(h('span', { class: 'chip prep-boost', role: 'listitem', title: b.desc }, boostDot(b), h('span', null, b.name + ' · today')));
     });
+  }
+  /** Dex is set up: his button springs into the footer with a glow ring (CSS) and a few twinkles on the FX layer */
+  function dealsArrive(b) {
+    restart(b, 'is-arriving');
+    setTimeout(function () { b.classList.remove('is-arriving'); }, 1500);
+    if (SS.reduced()) return;
+    setTimeout(function () {
+      var FX = SS.FX, cv = document.getElementById('fx');
+      if (!FX || !FX.burst || !cv || !b.isConnected || b.hidden || document.querySelector('#modal-root > *')) return;
+      var r = b.getBoundingClientRect(), c = cv.getBoundingClientRect();
+      safe('deals twinkle', function () { FX.burst('twinkle', r.left + r.width / 2 - c.left, r.top + r.height / 2 - c.top, { count: 9, power: 1.5 }); });
+    }, 330);
   }
 
   /* ------------------------------------------------------------------ *
@@ -1098,13 +1122,13 @@
       empty.hidden = here;
       if (!here) {
         var res = st.phase === 'results', first = (st.day | 0) < 2 && !res;
-        txt(emptyT, res ? 'Dex has packed up for the night' : first ? 'Dex rolls into town tomorrow' : 'Dex is not around right now');
-        txt(emptyP, res ? 'He\'ll be back in the morning.' : first ? 'He sells boosts that last one day, and sometimes a limited-edition flavor you can\'t get anywhere else.'
-          : 'Check back in the morning.');
+        txt(emptyT, res ? 'Dex has packed up for the night' : first ? 'Dex rolls into town tomorrow' : 'Dex is out of town today');
+        txt(emptyP, res ? 'He turns up some mornings, so keep an eye out for his trunk.' : first ? 'He sells boosts that last one day, and sometimes a limited-edition flavor you can\'t get anywhere else.'
+          : 'He turns up some mornings with boosts and, now and then, a limited-edition flavor.');
         return;
       }
       txt(line, '“' + (d.line || 'Step right up! Fresh deals, today only.') + '”');
-      txt(note.lastChild, st.phase === 'day' ? 'A boost you buy now works for the rest of today.' : 'A boost you buy now works for the whole day ahead. Tomorrow Dex brings new stock.');
+      txt(note.lastChild, st.phase === 'day' ? 'A boost you buy now works for the rest of today.' : 'A boost you buy now works for the whole day ahead. Dex brings new stock every time he visits.');
       var offers = d.offers.slice().sort(function (a, b) { return (b.kind === 'limited') - (a.kind === 'limited'); });
       var k = offers.map(function (o) { return o.id; }).join(',');
       if (k !== order) {
@@ -1201,6 +1225,7 @@
       ['cart', 'recipe', 'price', 'cash', 'upgrade:buy', 'flavor:buy', 'flavor:set', 'location:set', 'location:unlock', 'reputation', 'milestone',
         'dealer:buy', 'boost:on', 'regular:new', 'regular:lost']
         .forEach(function (e) { SS.on(e, onChange); });
+      SS.on('dealer:setup', function (p) { if (p && p.step === 'ready') onChange(); });
       onPhase();
     },
     open: function (name) { return safe('open ' + name, function () { return open(name); }); }

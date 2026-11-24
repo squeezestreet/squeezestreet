@@ -535,12 +535,15 @@
    *   cupsPerPitcher()  brewTime()  serveTime()  rent()
    *   -- regulars --
    *   regularsInfo() -> [ { id, name, kind, seed, streak, best, visits, mult, since, lastDay } ]   best streaks first
-   *   -- Dex the Dealer: he visits SOME days only (always day 2, then by chance, never more than a few days away; see TUNE in sim.js).
+   *   -- Dex the Dealer: he visits SOME days only (never day 1, always day 2, then about 45% of days and never more than
+   *      3 days in a row away; TUNE.dexChance / dexGap in sim.js). A limited flavor comes on about half his visits from day 3
+   *      (never more than 3 visits in a row without one, while you still lack some; TUNE.limitedChance / limitedGap).
    *      On a visit day he is open in 'prep' and 'day'; gone in 'results', on day 1 and on days he stays away.
    *      Whether he comes is fixed by (seed, day): a reload never changes it. --
    *   dealerInfo() -> { present, line, offers: [ { id, kind, name, desc, icon, color, cost, sold, canBuy, reason } ], active: [boostId] }
    *       line = one short thing Dex says today (changes daily). kind 'limited' offers carry the flavor's color.
-   *   buyDeal(id) -> { ok, reason }   id is a boost id or a limited flavor id from today's offers
+   *       On a day he stays away: present false, line '', offers [] (active still lists boosts already working).
+   *   buyDeal(id) -> { ok, reason }   id is a boost id or a limited flavor id from today's offers ('Dex is not in town today.' when he stays away)
    *       In the morning Dex never takes the cash Grandma would have to replace (keep enough for a few cups of supplies).
    *       Hype Squad is not sold late in the day, when regulars could no longer reach the stand.
    *   boostActive(id) -> bool

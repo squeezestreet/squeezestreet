@@ -130,7 +130,8 @@ const SPEC = {
   'regular:broken': (p) => isRegular(p.regular, false) && isCustomer(p.c) && BREAKS.includes(p.reason) && typeof p.shielded === 'boolean' && (p.shielded || p.regular.streak === 0),
   'regular:lost': (p) => isRegular(p.regular, false) && p.regular.strikes === 2,
   'loyalty': (p) => isCustomer(p.c) && isStr(p.c.regularId) && isNum(p.amount) && p.amount > 0 && p.mult > 1 && p.mult === p.c.mult,
-  'dealer:buy': (p) => (p.kind === 'boost' ? !!D.byId(D.boosts, p.id) : p.kind === 'limited' && !!(D.byId(D.flavors, p.id) || {}).limited) && isNum(p.cost) && p.cost > 0,
+  'dealer:buy': (p) => (p.kind === 'boost' ? !!D.byId(D.boosts, p.id) : p.kind === 'limited' && !!(D.byId(D.flavors, p.id) || {}).limited) && isNum(p.cost) && p.cost > 0 &&
+    !!SS.state.dealer && SS.state.dealer.day === SS.state.day,          // only ever bought on a day Dex is in town
   'boost:on': (p) => !!D.byId(D.boosts, p.id)
 };
 const seen = {};
@@ -177,7 +178,11 @@ function checkState(tag) {
   if (st.phase === 'results') ok(st.boosts.length === 0, tag + ': boosts must clear when the day ends');
   if (st.phase === 'prep' || st.phase === 'day') {
     if (st.day < 2) ok(st.dealer === null && Sim.dealerInfo().present === false, tag + ': no Dex on day 1');
-    else {
+    else if (st.dealer === null) {                        // a day Dex stays away
+      const info = Sim.dealerInfo(), no = Sim.buyDeal('flyers');
+      ok(info.present === false && info.line === '' && info.offers.length === 0 && Array.isArray(info.active), tag + ': dealerInfo on a day Dex stays away');
+      ok(!no.ok && no.reason === 'Dex is not in town today.', tag + ': buyDeal on a day Dex stays away: ' + JSON.stringify(no));
+    } else {
       const dl = st.dealer, info = Sim.dealerInfo();
       ok(isObj(dl) && dl.day === st.day && Array.isArray(dl.offers) && dl.offers.length <= 4 && dl.offers.filter((o) => o.kind === 'boost').length <= 3, tag + ': dealer stock');
       ok(new Set(dl.offers.map((o) => o.id)).size === dl.offers.length && dl.offers.every((o) => typeof o.sold === 'boolean' &&
@@ -397,9 +402,9 @@ function playGame(seed, bot, days) {
     ok(isWx(st.forecast) && isNum(st.forecast.confidence) && st.forecast.confidence >= 0 && st.forecast.confidence <= 1, tag + ': forecast');
     ok(isEvent(st.event) && (!st.event || st.event.known === true), tag + ': morning event must be a known one');
     ITEMS.forEach((it) => ok(isNum(st.market[it]) && st.market[it] > 0, tag + ': market.' + it));
-    if (d >= 2) ok(st.dealer.offers.filter((o) => o.kind === 'boost' && !o.sold).length === 3, tag + ': Dex should open with 3 different boosts');
+    if (st.dealer) ok(st.dealer.offers.filter((o) => o.kind === 'boost' && !o.sold).length === 3, tag + ': Dex should open with 3 different boosts');
     if (d % 9 === 2) { roundTrip(tag + ' morning'); st = SS.state; }
-    const morning = { market: Object.assign({}, st.market), forecast: Object.assign({}, st.forecast), event: st.event ? st.event.id : null };
+    const morning = { market: Object.assign({}, st.market), forecast: Object.assign({}, st.forecast), event: st.event ? st.event.id : null, dex: !!st.dealer };
 
     bot.prep(st);
     const info = Sim.prepInfo();
@@ -465,7 +470,7 @@ ok(phaseLog.filter((p) => p === 'prep>day').length === phaseLog.filter((p) => p 
 
 /* same seed, same mornings (and, with the same bot, the same game) */
 const again = playGame(SEEDS[0], competentBot(), DAYS);
-const strip = (rows) => rows.map((r) => ({ forecast: r.forecast, weather: r.weather }));
+const strip = (rows) => rows.map((r) => ({ forecast: r.forecast, weather: r.weather, dex: r.dex }));     // Dex's visits depend on (seed, day) only
 const plainMarket = (a, b) => a.map((r, i) => (r.event || b[i].event ? null : r.market));   // events move prices and depend on how you play
 try { require('assert').deepStrictEqual(again.rows, games.competent[0].rows); checks++; } catch (e) { ok(false, 'same seed + same bot gave a different game: ' + String(e.message).slice(0, 300)); }
 SEEDS.forEach((seed, i) => {
@@ -473,7 +478,7 @@ SEEDS.forEach((seed, i) => {
     require('assert').deepStrictEqual(strip(games.naive[i].rows), strip(games.competent[i].rows));
     require('assert').deepStrictEqual(strip(games.greedy[i].rows), strip(games.competent[i].rows));
     require('assert').deepStrictEqual(plainMarket(games.naive[i].rows, games.competent[i].rows), plainMarket(games.competent[i].rows, games.naive[i].rows)); checks++;
-  } catch (e) { ok(false, 'seed ' + seed + ': market / forecast / weather differ between bots: ' + String(e.message).slice(0, 200)); }
+  } catch (e) { ok(false, 'seed ' + seed + ': market / forecast / weather / Dex\'s visits differ between bots: ' + String(e.message).slice(0, 200)); }
 });
 const m1 = games.competent[0].rows, m2 = games.competent[1].rows;
 ok(JSON.stringify(strip(m1)) !== JSON.stringify(strip(m2)), 'different seeds should give different mornings');
@@ -762,15 +767,18 @@ const rowOf = (id) => (SS.state.lastResult.regulars || []).find((r) => r.id === 
   ok(!Sim.buyDeal('cotton').ok, 'a limited flavor cannot be bought twice');
 }
 
-/* Dex: never on day 1, never re-rolled by a reload, deterministic, pity rule for limited flavors */
+/* Dex: never on day 1, never re-rolled by a reload, deterministic */
 {
   let st = morningOf(8080, 1);
   ok(st.dealer === null && !Sim.dealerInfo().present, 'no Dex on day 1');
   const r1 = Sim.buyDeal('flyers');
   ok(!r1.ok && isStr(r1.reason), 'buyDeal on day 1 explains why not');
-  st = morningOf(8080, 6);
+  let visitDay = 0, awayDay = 0;                         // a day he comes and a day he stays away, after day 3
+  for (let d = 4; d < 40 && !(visitDay && awayDay); d++) { st = morningOf(8080, d); if (st.dealer && !visitDay) visitDay = d; if (!st.dealer && !awayDay) awayDay = d; }
+  ok(visitDay > 0 && awayDay > 0, 'seed 8080 needs a day with Dex and a day without him (' + visitDay + ', ' + awayDay + ')');
+  st = morningOf(8080, visitDay);
   const first = JSON.stringify(st.dealer);
-  st = morningOf(8080, 6);
+  st = morningOf(8080, visitDay);
   ok(JSON.stringify(st.dealer) === first, 'the same seed and day give the same stock');
   st.cash = 500;
   const pick = st.dealer.offers.find((o) => o.kind === 'boost' && Sim.dealerInfo().offers.find((x) => x.id === o.id).canBuy);
@@ -795,21 +803,58 @@ const rowOf = (id) => (SS.state.lastResult.regulars || []).find((r) => r.id === 
   const want = { unknown: /Dex/, notToday: /Dex/, sold: /Sold out/, active: /Already/, useless: /regulars/, cash: /more/, results: /packed up/ };
   Object.keys(want).forEach((k) => ok(fails[k] && fails[k].ok === false && want[k].test(fails[k].reason), 'buyDeal failure "' + k + '" needs a reason that says what is wrong: ' + JSON.stringify(fails[k])));
   ok(s.cash === 500 && s.boosts.length === 1, 'failed deals must not touch cash or boosts');
+  // a day he stays away: nothing for sale, all day, and a reload does not bring him
+  st = morningOf(8080, awayDay);
+  checkState('a day without Dex');
+  const away = Sim.buyDeal('flyers');
+  ok(st.dealer === null && !away.ok && away.reason === 'Dex is not in town today.', 'no deals on a day Dex stays away: ' + JSON.stringify(away));
+  SS.state = null; Sim.init(); Sim.continueGame();
+  ok(SS.state.day === awayDay && SS.state.dealer === null && !Sim.dealerInfo().present, 'a reload on a day Dex stays away does not bring him');
+  restock(SS.state, 12);
+  const open = Sim.startDay();
+  ok(open.ok, 'a day without Dex opens as usual: ' + open.reason);
+  for (let i = 0; i < 200; i++) Sim.update(0.1);
+  checkState('a day without Dex, open');
+  Sim.closeEarly();
+  ok(SS.state.phase === 'results' && SS.state.dealer === null, 'and closes as usual');
   Sim.init();
   ok(!Sim.buyDeal('flyers').ok && !Sim.dealerInfo().present && Sim.regularsInfo().length === 0 && Sim.boostActive('flyers') === false, 'title screen: no Dex, no regulars');
-  // over many days: 3 different boosts each day, a limited flavor about a third of the time and never more than 6 days apart
-  st = morningOf(8080, 2);
-  let last = 2, gap = 0, lim = 0, n = 0;
-  for (let d = 3; d <= 150; d++) {
-    st = SS.state; st.phase = 'results'; st.lastResult = null; Sim.nextDay();
-    st = SS.state;
-    const boosts = st.dealer.offers.filter((o) => o.kind === 'boost');
-    ok(st.dealer.day === d && boosts.length === 3 && new Set(boosts.map((o) => o.id)).size === 3, 'day ' + d + ': Dex needs 3 different boosts');
-    if (st.dealer.offers.some((o) => o.kind === 'limited')) { gap = Math.max(gap, d - last); last = d; lim++; }
-    n++;
+}
+
+/* Dex's calendar over many seeds x 200 days: always day 2, about 45% of days, never more than 3 days in a row away;
+ * a limited flavor only when he comes, on about half his visits from day 3, never more than 3 visits in a row without one */
+{
+  const N = 30, LAST = 200;
+  let days = 0, visits = 0, day2 = 0, worstAway = 0, visits3 = 0, limVisits = 0, worstDry = 0, reloads = 0;
+  for (let k = 0; k < N; k++) {
+    const seed = 1000 + 7919 * k;
+    let st = morningOf(seed, 2), away = 0, dry = 0;
+    if (st.dealer) day2++;
+    for (let d = 2; d <= LAST; d++) {
+      if (d > 2) { st.phase = 'results'; st.lastResult = null; Sim.nextDay(); st = SS.state; }
+      const tag = 'dex ' + seed + '/day' + d;
+      checkState(tag);                                   // away days: dealer null, nothing offered, buyDeal refused
+      if (k < 3 && d % 17 === 0) {                       // a reload never changes whether he came or what he brought
+        const before = JSON.stringify(st.dealer);
+        SS.state = null; Sim.init(); Sim.continueGame(); st = SS.state; reloads++;
+        ok(JSON.stringify(st.dealer) === before && st.day === d, tag + ': a reload changed Dex');
+      }
+      days++;
+      if (!st.dealer) { away++; worstAway = Math.max(worstAway, away); continue; }
+      visits++; away = 0;
+      const boosts = st.dealer.offers.filter((o) => o.kind === 'boost'), lim = st.dealer.offers.some((o) => o.kind === 'limited');
+      ok(st.dealer.day === d && boosts.length === 3 && new Set(boosts.map((o) => o.id)).size === 3, tag + ': Dex needs 3 different boosts');
+      if (d < 3) { ok(!lim, tag + ': no limited flavor on day 2'); continue; }
+      visits3++;
+      if (lim) { limVisits++; dry = 0; } else worstDry = Math.max(worstDry, ++dry);
+    }
   }
-  ok(gap <= 6 && lim / n > 0.25 && lim / n < 0.5, 'limited flavors: ' + lim + ' of ' + n + ' days, longest wait ' + gap + ' days');
-  console.log('\nDex over days 3-150 (seed 8080): a limited flavor on ' + lim + ' days (' + (100 * lim / n).toFixed(0) + '%), longest wait ' + gap + ' days');
+  ok(day2 === N, 'Dex always comes on day 2 (' + day2 + ' of ' + N + ' games)');
+  ok(visits / days >= 0.35 && visits / days <= 0.6, 'Dex should come on about 45% of days, got ' + (100 * visits / days).toFixed(1) + '%');
+  ok(worstAway <= 3, 'never more than 3 days in a row without Dex, got ' + worstAway);
+  ok(worstDry <= 3 && limVisits / visits3 > 0.38 && limVisits / visits3 < 0.62, 'limited flavors: ' + limVisits + ' of ' + visits3 + ' visits, longest run without one ' + worstDry);
+  console.log('\nDex over days 2-' + LAST + ' (' + N + ' seeds, ' + reloads + ' reloads): in town ' + (100 * visits / days).toFixed(1) + '% of days, longest time away ' + worstAway +
+    ' days; a limited flavor on ' + (100 * limVisits / visits3).toFixed(0) + '% of visits from day 3, longest run without one ' + worstDry + ' visits');
 }
 
 /* old saves without the new fields load; broken new fields are cleaned up */
@@ -817,8 +862,23 @@ const rowOf = (id) => (SS.state.lastResult.regulars || []).find((r) => r.id === 
   disk.set(SS.SAVE_KEY, JSON.stringify({ v: 1, phase: 'prep', day: 9, cash: 50, seed: 4, tutorial: { done: true } }));
   ok(Sim.continueGame() === true, 'an old save without regulars / boosts / dealer should load');
   checkState('old save');
-  ok(SS.state.regulars.length === 0 && SS.state.boosts.length === 0 && SS.state.boostCost === 0 && SS.state.dealer && SS.state.dealer.day === 9 &&
-    SS.state.stats.bestStreak === 0 && SS.state.nextRegular === 1, 'old save gets empty regulars, no boosts and a fresh Dex');
+  ok(SS.state.regulars.length === 0 && SS.state.boosts.length === 0 && SS.state.boostCost === 0 &&
+    SS.state.stats.bestStreak === 0 && SS.state.nextRegular === 1, 'old save gets empty regulars and no boosts');
+  // ...and today's Dex, exactly as a fresh game on that seed and day would have him (or not)
+  const dexOn = (seed, day) => JSON.stringify(morningOf(seed, day).dealer);
+  for (let day = 3; day <= 12; day++) {
+    const wantDex = dexOn(4, day);
+    disk.set(SS.SAVE_KEY, JSON.stringify({ v: 1, phase: 'prep', day, cash: 50, seed: 4 }));
+    ok(Sim.continueGame() === true && JSON.stringify(SS.state.dealer) === wantDex, 'old save on day ' + day + ' gets today\'s Dex: ' + JSON.stringify(SS.state.dealer) + ' vs ' + wantDex);
+    disk.set(SS.SAVE_KEY, JSON.stringify({ v: 1, phase: 'prep', day, cash: 50, seed: 4, dealer: { day: day - 1, offers: [{ id: 'golden', kind: 'boost', sold: true }] } }));
+    ok(Sim.continueGame() === true && JSON.stringify(SS.state.dealer) === wantDex, 'a save with yesterday\'s Dex gets today\'s on day ' + day);
+    checkState('old save day ' + day);
+    if (wantDex !== 'null') continue;
+    // a save that already holds Dex for today keeps him, even on a day the calendar would leave him away
+    const kept = { day, offers: [{ id: 'golden', kind: 'boost', sold: true }, { id: 'lucky', kind: 'boost', sold: false }] };
+    disk.set(SS.SAVE_KEY, JSON.stringify({ v: 1, phase: 'prep', day, cash: 50, seed: 4, dealer: kept }));
+    ok(Sim.continueGame() === true && JSON.stringify(SS.state.dealer) === JSON.stringify(kept) && Sim.dealerInfo().present, 'a save holding today\'s Dex keeps him on day ' + day);
+  }
   const junkRegs = [];
   for (let i = 0; i < 16; i++) junkRegs.push({ id: 'r' + (i % 14 + 1), name: i === 3 ? 42 : 'X' + i, kind: i === 2 ? 'vip' : i === 5 ? 'ghost' : 'kid', seed: i === 4 ? 'abc' : 7 * i,
     streak: i === 6 ? NaN : i === 7 ? -3 : i + 0.5, best: 2, visits: i === 8 ? Infinity : 3, strikes: i === 9 ? 7 : 0, since: 99, lastDay: -1 });
@@ -833,7 +893,7 @@ const rowOf = (id) => (SS.state.lastResult.regulars || []).find((r) => r.id === 
   ok(s2.regulars.length === 12 && new Set(s2.regulars.map((g) => g.id)).size === 12 && s2.regulars.every((g) => isRegular(g, true)), 'regulars repaired: 12 valid and unique (' + s2.regulars.length + ')');
   ok(s2.nextRegular > Math.max(...s2.regulars.map((g) => Number(g.id.slice(1)))), 'nextRegular never reuses an id');
   ok(JSON.stringify(s2.boosts) === '["golden"]' && s2.boostCost === 0, 'boosts repaired: ' + JSON.stringify(s2.boosts) + ' ' + s2.boostCost);
-  ok(JSON.stringify(s2.dealer.offers) === JSON.stringify([{ id: 'golden', kind: 'boost', sold: true }, { id: 'rainbow', kind: 'limited', sold: false }]), 'dealer repaired: ' + JSON.stringify(s2.dealer));
+  ok(JSON.stringify(s2.dealer && s2.dealer.offers) === JSON.stringify([{ id: 'golden', kind: 'boost', sold: true }, { id: 'rainbow', kind: 'limited', sold: false }]), 'dealer repaired: ' + JSON.stringify(s2.dealer));
   ok(s2.tutorial.done === true && s2.tutorial.dex === true && !('junk' in s2.tutorial), 'every boolean tutorial flag survives a repair');
   ok(Number.isInteger(s2.stats.bestStreak) && s2.stats.bestStreak >= 9, 'bestStreak repaired');
   const lr = s2.lastResult;
