@@ -38,8 +38,23 @@
     tipTtl: 7,
     loanCups: 6,          // Grandma steps in when you cannot make this many cups
     maxPacks: 99,
-    closeGrace: 2.5       // seconds the last pour and last reviews get after closing time
+    closeGrace: 2.5,      // seconds the last pour and last reviews get after closing time
+    // regulars
+    regChance: 0.3,       // chance a delighted customer becomes a regular (shrinks as the list fills)
+    regMood: 0.45,        // review mood needed to become one
+    regCap: 12, regPerDay: 1,
+    regHappy: 0.15,       // a regular's review mood at or above this keeps the streak going
+    visit: 0.75, visitWet: 0.5, visitStorm: 0.3,   // chance a regular comes by, by weather
+    regPatience: 0.08,    // extra patience per streak step (up to 10 steps)
+    regLine: 2,           // regulars will join a line this many people longer than anyone else
+    regLast: 0.8,         // regulars turn up by this point of the day, so they reach the stand before closing
+    // Dex the Dealer
+    flyers: 1.35, golden: 1.25, lucky: 2,
+    dealerScale: [1, 2, 3.5, 6, 9],                  // boost prices by location, Maple Street .. carnival
+    limitedChance: 0.3, limitedPity: 6               // a limited flavor some days, never more than 6 days apart
   };
+  var OUTCOMES = ['new', 'streak', 'broken', 'saved', 'lost', 'closed', 'away'];
+  var BREAKS = ['taste', 'pricey', 'slow', 'wait', 'soldout', 'quit'];
 
   var WX_ORDER = ['storm', 'rainy', 'cloudy', 'sunny', 'heatwave'];
   var WX_WEIGHT = { storm: 5, rainy: 14, cloudy: 22, sunny: 43, heatwave: 16 };
@@ -66,6 +81,19 @@
       'Worth it, though my feet hurt from standing.', 'You need more hands back there.', 'I aged a year in that line.'],
     quiet: ['Hardly a soul out today.', 'Quiet out here, isn\'t it?', 'I had the whole sidewalk to myself.',
       'Not many people about in this weather.', 'You will have more luck on a sunnier day.', 'Slow day. Tomorrow will be better.']
+  };
+
+  /* What Dex the Dealer says, one line a day. {name} = today's limited flavor. */
+  var DEX = {
+    any: ['Step right up! Fresh deals, today only.', 'Psst. Want a busier day? I can make that happen.',
+      'Everything in the van is one day only. Tomorrow it is gone.', 'Best deals on the street, and I am the only one selling.',
+      'Your stand looks ready for a little extra sparkle.', 'Trust me, friend. These practically sell themselves.',
+      'Fresh from the back of my van. Get them while they last.', 'I have got just the thing for a day like today.',
+      'Business is good? Let us make it great.', 'Dex\'s deals: tested by me, loved by everyone.',
+      'Pick one, pick two. I will not tell anyone.', 'Big day ahead? Do not go into it empty-handed.'],
+    limited: ['Something rare in the van today: {name}. No shop in town has it.', 'Limited edition, just for you: {name}. Once it is gone, it is gone.',
+      'Shh. I found a crate of {name}. You did not hear it from me.'],
+    sold: ['You cleaned me out! Back tomorrow with fresh stock.', 'Sold out, and proud of it. See you tomorrow, partner.']
   };
 
   /* Module state ------------------------------------------------------- */
@@ -96,9 +124,19 @@
   function flavorDef(id) { return D.byId(D.flavors, id) || D.flavors[0]; }
   function shopOpen(st) { return !!st && (st.phase === 'prep' || st.phase === 'results'); }
   var SHOP_CLOSED = 'You can shop before you open or after you close, not while the stand is open.';
+  function boostDef(id) { return D.byId(D.boosts, id); }
+  function boostOn(id) { var st = SS.state; return !!st && Array.isArray(st.boosts) && st.boosts.indexOf(id) >= 0; }
+  function isLimited(id) { var f = D.byId(D.flavors, id); return !!f && !!f.limited; }
+  function cnt(v, max) { return clamp(Math.floor(fin(v, 0)), 0, max); }
+  function idNum(id) { return parseInt(String(id).slice(1), 10) || 0; }
+  function regById(id) {
+    var l = SS.state && SS.state.regulars, i;
+    if (l) for (i = 0; i < l.length; i++) if (l[i].id === id) return l[i];
+    return null;
+  }
 
   function cupsPerPitcher() { return upVal('pitcher') || 8; }
-  function brewTime() { return upVal('juicer') || 6; }
+  function brewTime() { return (upVal('juicer') || 6) * (boostOn('turbo') ? 0.5 : 1); }
   function serveTime() { return TUNE.serve / (1 + TUNE.helper * upLevel('helper')); }
   function rent() { var st = SS.state; return st ? locDef(st.location).rent : 0; }
 
@@ -132,9 +170,10 @@
       price: D.price.start,
       market: baseMarket(), forecast: { type: 'sunny', temp: 26, confidence: 0.9 }, weather: { type: 'sunny', temp: 26 },
       event: null, milestonesDone: [],
-      stats: { days: 0, bestProfit: 0, bestCups: 0, tips: 0, served: 0 },
+      stats: { days: 0, bestProfit: 0, bestCups: 0, tips: 0, served: 0, bestStreak: 0 },
       history: [], today: null, lastResult: null,
-      settings: cleanSettings(settings), tutorial: { done: false }, won: false
+      settings: cleanSettings(settings), tutorial: { done: false }, won: false,
+      regulars: [], nextRegular: 1, boosts: [], boostCost: 0, dealer: null
     };
   }
 
@@ -205,8 +244,44 @@
       advice: typeof raw.advice === 'string' ? raw.advice : '',
       hourly: hourly, spoiled: { lemons: Math.max(0, fin(sp.lemons, 0)), ice: Math.max(0, fin(sp.ice, 0)) },
       milestones: (Array.isArray(raw.milestones) ? raw.milestones : []).filter(function (id) { return !!D.byId(D.milestones, id); }),
-      bestDay: !!raw.bestDay, cashAfter: fin(raw.cashAfter, 0)
+      bestDay: !!raw.bestDay, cashAfter: fin(raw.cashAfter, 0),
+      loyalty: Math.max(0, fin(raw.loyalty, 0)), boostCost: Math.max(0, fin(raw.boostCost, 0)),
+      boosts: (Array.isArray(raw.boosts) ? raw.boosts : []).filter(function (id, i, a) { return !!boostDef(id) && a.indexOf(id) === i; }),
+      regulars: (Array.isArray(raw.regulars) ? raw.regulars : []).filter(function (r) {
+        return r && typeof r === 'object' && typeof r.id === 'string' && !!D.regularNames[r.kind] && OUTCOMES.indexOf(r.outcome) >= 0;
+      }).slice(0, 24).map(function (r) {
+        var streak = cnt(r.streak, 9999);
+        return { id: r.id, name: typeof r.name === 'string' ? r.name : '', kind: r.kind, outcome: r.outcome, streak: streak, mult: SS.loyaltyMult(streak),
+          bonus: Math.max(0, fin(r.bonus, 0)), reason: BREAKS.indexOf(r.reason) >= 0 ? r.reason : '' };
+      })
     };
+  }
+
+  /** Saved regulars: known kinds only, unique ids, whole non-negative numbers, at most regCap. */
+  function cleanRegulars(raw, day) {
+    var out = [], ids = [];
+    (Array.isArray(raw) ? raw : []).forEach(function (r) {
+      if (out.length >= TUNE.regCap || !r || typeof r !== 'object' || !D.regularNames[r.kind]) return;
+      if (typeof r.id !== 'string' || !/^r\d{1,9}$/.test(r.id) || ids.indexOf(r.id) >= 0) return;
+      ids.push(r.id);
+      var streak = cnt(r.streak, 9999), since = clamp(Math.floor(fin(r.since, day)), 1, day);
+      out.push({ id: r.id, name: typeof r.name === 'string' && r.name ? r.name.slice(0, 40) : D.regularNames[r.kind][0], kind: r.kind,
+        seed: cnt(r.seed, 2147483646), streak: streak, best: Math.max(streak, cnt(r.best, 9999)), visits: Math.max(1, cnt(r.visits, 1e6)),
+        strikes: cnt(r.strikes, 1), since: since, lastDay: clamp(Math.floor(fin(r.lastDay, since)), since, day) });
+    });
+    return out;
+  }
+  /** Dex's saved stock: known boosts and limited flavors only, no repeats. */
+  function cleanDealer(raw) {
+    if (!raw || typeof raw !== 'object' || !Array.isArray(raw.offers)) return null;
+    var offers = [], ids = [];
+    raw.offers.forEach(function (o) {
+      if (!o || typeof o !== 'object' || ids.indexOf(o.id) >= 0 || offers.length >= 4) return;
+      if (o.kind === 'boost' ? !boostDef(o.id) : o.kind !== 'limited' || !isLimited(o.id)) return;
+      ids.push(o.id);
+      offers.push({ id: o.id, kind: o.kind, sold: !!o.sold });
+    });
+    return { day: Math.max(1, Math.floor(fin(raw.day, 1))), offers: offers };
   }
 
   /** Append the known, not-yet-present ids from a saved list, keeping the saved order. */
@@ -254,8 +329,18 @@
       }
     }
     st.lastResult = cleanResult(raw.lastResult);
-    st.tutorial = { done: !!(raw.tutorial && raw.tutorial.done) };
+    if (raw.tutorial && typeof raw.tutorial === 'object') for (k in raw.tutorial) if (typeof raw.tutorial[k] === 'boolean') st.tutorial[k] = raw.tutorial[k];
     st.won = !!raw.won;
+    st.regulars = cleanRegulars(raw.regulars, st.day);
+    st.nextRegular = Math.max(1, Math.min(1e9, Math.floor(fin(raw.nextRegular, 1))));
+    st.regulars.forEach(function (g) {
+      st.nextRegular = Math.max(st.nextRegular, idNum(g.id) + 1);          // ids are never reused
+      st.stats.bestStreak = Math.max(st.stats.bestStreak, g.best);
+    });
+    st.stats.bestStreak = Math.floor(st.stats.bestStreak);
+    addIds(st.boosts, raw.boosts, D.boosts);
+    st.boostCost = st.boosts.length ? r2(Math.max(0, fin(raw.boostCost, 0))) : 0;
+    st.dealer = cleanDealer(raw.dealer);
     return st;
   }
 
@@ -339,10 +424,14 @@
   function perCup(st) { return { lemons: st.recipe.lemons / 10, sugar: st.recipe.sugar / 10, ice: st.recipe.ice, cups: 1 }; }
 
   /** If the player cannot buy enough to make a few cups, Grandma covers the difference. */
+  function loanNeed(st) {
+    var need = 0, per = perCup(st);
+    if (st.market) ITEMS.forEach(function (it) { if (per[it] > 0 && st.stock[it] < per[it] * TUNE.loanCups) need += st.market[it]; });
+    return need;
+  }
   function grandma(st) {
     if (st.phase !== 'prep' || !st.market) return;
-    var need = 0, per = perCup(st);
-    ITEMS.forEach(function (it) { if (per[it] > 0 && st.stock[it] < per[it] * TUNE.loanCups) need += st.market[it]; });
+    var need = loanNeed(st);
     if (need <= 0 || st.cash >= need) return;
     var loan = Math.ceil(need - st.cash) + 2;
     st.cash = r2(st.cash + loan);
@@ -388,6 +477,7 @@
     st.weather = { type: m.forecast.type, temp: m.forecast.temp };   // placeholder until the day starts
     st.event = m.event && m.event.known ? m.event : null;
     st.cart = zeros();
+    rollDealer(st);
     st.phase = 'prep';
     emit('phase', { from: from, to: 'prep' });
     if (st.event) emit('event:trigger', { id: st.event.id, title: st.event.title, desc: st.event.desc, icon: st.event.icon });
@@ -496,6 +586,8 @@
     var st = SS.state, can = canStartDay();
     if (!can.ok) return can;
     var m = rollMorning(st), cost = cartCost(), rentPaid = rent(), loc = locDef(st.location);
+    if (!Array.isArray(st.regulars)) st.regulars = [];          // states built by hand (debug tools) may lack these
+    if (!Array.isArray(st.boosts)) { st.boosts = []; st.boostCost = 0; }
     st.cash = r2(Math.max(0, st.cash - cost - rentPaid));
     ITEMS.forEach(function (it) { st.stock[it] += st.cart[it] * D.items[it].pack; st.cart[it] = 0; });
     st.weather = { type: m.actual.type, temp: m.actual.temp };
@@ -506,7 +598,7 @@
       bell: { cd: 0, max: TUNE.bellCd, active: 0 },
       soldOut: null, weatherNow: { type: st.weather.type, temp: st.weather.temp },
       missed: { pricey: 0, wait: 0, soldout: 0, quit: 0 },
-      hourly: [0, 0, 0, 0, 0, 0, 0, 0, 0]
+      hourly: [0, 0, 0, 0, 0, 0, 0, 0, 0], loyalty: 0
     };
     var rng = dayRng(st.seed, st.day, 777), ev = eventMods(st.event ? st.event.id : null);
     var mix = [], total = 0, k;
@@ -520,12 +612,20 @@
       reviews: [], vipReview: null, satSum: 0, satN: 0, sweetSum: 0, kinds: {}, lastLine: {},
       passed: 0, served: 0, soldOutAt: null, approaching: 0, patMul: 1,
       surprise: m.event && !m.event.known ? { ev: m.event, at: 0.38 + 0.25 * rng(), done: false, until: 0 } : null,
-      vipAt: ev.critic ? 0.3 + 0.3 * rng() : -1, vipSeen: false, vipServed: false
+      vipAt: ev.critic ? 0.3 + 0.3 * rng() : -1, vipSeen: false, vipServed: false,
+      sched: [], regRows: [], newRegs: 0, shieldUsed: false
     };
+    // which regulars come by today, and when: fixed by (seed, day, regular)
+    var wxId = st.weather.type, come = boostOn('hype') ? 1 : wxId === 'storm' ? TUNE.visitStorm : wxId === 'rainy' ? TUNE.visitWet : TUNE.visit;
+    st.regulars.forEach(function (g) {
+      var r = dayRng(st.seed, st.day, 1000 + idNum(g.id)), roll = r(), at = lerp(0.06, TUNE.regLast, r()), dir = r() < 0.5 ? 1 : -1;
+      if (roll < come) rt.sched.push({ id: g.id, at: at, dir: dir, cid: 0, done: false });
+    });
     st.phase = 'day';
     if (cost + rentPaid > 0) emit('cash', { amount: st.cash, delta: -r2(cost + rentPaid), reason: 'supplies' });
     emit('phase', { from: 'prep', to: 'day' });
     emit('day:start', { day: st.day, weather: st.weather, event: st.event });
+    st.boosts.forEach(function (id) { emit('boost:on', { id: id }); });
     // a few people are already out and about, so the street is not empty at opening time
     var n = Math.min(14, Math.round(spawnRate(st, st.today) * 7));
     for (var i = 0; i < n && rt; i++) {
@@ -544,7 +644,8 @@
   }
   function spawnRate(st, td) {
     var wxId = td.weatherNow.type, wx = D.weather[wxId] || D.weather.sunny, lw = LOC_WX[rt.loc.id];
-    return TUNE.rate * rt.loc.traffic * wx.traffic * (lw && lw[wxId] || 1) * rt.ev.traffic * curve(td.t, rt.loc.id) * (0.85 + 0.06 * st.reputation);
+    return TUNE.rate * rt.loc.traffic * wx.traffic * (lw && lw[wxId] || 1) * rt.ev.traffic * curve(td.t, rt.loc.id) * (0.85 + 0.06 * st.reputation) *
+      (boostOn('flyers') ? TUNE.flyers : 1);
   }
   function pickKind() {
     var at = rt.rng() * rt.mixTotal, i;
@@ -553,7 +654,8 @@
   }
   function setBubble(c, type, ttl) { c.bubble = { type: type, ttl: ttl, max: ttl }; }
 
-  function spawn(kind, x, dir) {
+  /** reg = the Regular this customer is (they keep their own look and get their loyalty perks) */
+  function spawn(kind, x, dir, reg) {
     var td = rt.today, rng = rt.rng, k = D.kinds[kind] || D.kinds.parent;
     var band = W.PASS_LANES[rng() < 0.36 ? 0 : 1], lane = lerp(band[0], band[1], rng());
     var walk = TUNE.walk * k.speed * (0.88 + 0.24 * rng());
@@ -562,9 +664,14 @@
     var c = {
       id: rt.nextId++, kind: kind, seed: Math.floor(rng() * 2147483647), x: x, lane: lane, dir: dir, speed: walk,
       state: 'walk', stateT: 0, hasDrink: false, mood: 0, patience: 1, bubble: null, qty: qty,
+      regularId: null, streak: 0, mult: 1,
       _walk: walk, _lane0: lane, _laneT: lane, _dir0: dir, _decided: false, _cold: false, _retry: false, _hover: false,
-      _wtp: 0, _pat: TUNE.patience * k.patience, _warned: false, _rev: null
+      _wtp: 0, _pat: TUNE.patience * k.patience, _warned: false, _rev: null, _bonus: 0
     };
+    if (reg) {
+      c.seed = reg.seed; c.regularId = reg.id; c.streak = reg.streak; c.mult = SS.loyaltyMult(reg.streak);
+      c._pat *= 1 + TUNE.regPatience * Math.min(reg.streak, 10);
+    }
     td.customers.push(c);
     rt.map.set(c.id, c);
     rt.passed++;
@@ -589,6 +696,7 @@
     if (c.state !== 'walk') sendAway(c);
     if (c.kind === 'vip') rt.vipSeen = true;
     emit('customer:balk', { c: c, reason: reason });
+    if (c.regularId) regularBad(c, reason);
   }
 
   function linePerPerson() { return serveTime() * 1.15 + brewTime() / cupsPerPitcher(); }
@@ -598,11 +706,13 @@
     c._decided = true;
     var p = TUNE.interest * wx.thirst * k.thirst * (1 + upVal('stand')) * (1 + upVal('sign')) *
       (0.75 + 0.1 * st.reputation) * (1 + 0.4 * fl.wtp) * rt.ev.interest * (belled ? TUNE.bellBoost : 1);
-    if (c.kind !== 'vip' && rng() >= Math.min(0.95, p)) { c._cold = true; return; }   // not thirsty: walks on
+    // regulars came for you: they skip the "am I thirsty" roll
+    if (c.kind !== 'vip' && !c.regularId && rng() >= Math.min(0.95, p)) { c._cold = true; return; }   // not thirsty: walks on
     c._cold = false;
     if (td.soldOut) { balk(c, 'soldout'); return; }
     var wxWtp = wx.thirst >= 1 ? 1 + 0.4 * (wx.thirst - 1) : 1 - 0.3 * (1 - wx.thirst);
-    c._wtp = TUNE.wtp * rt.loc.wtp * k.wtp * wxWtp * (1 + fl.wtp) * (0.85 + 0.075 * st.reputation) * rt.ev.wtp * (0.62 + 0.45 * (rng() + rng()));
+    c._wtp = TUNE.wtp * rt.loc.wtp * k.wtp * wxWtp * (1 + fl.wtp) * (0.85 + 0.075 * st.reputation) * rt.ev.wtp * (0.62 + 0.45 * (rng() + rng())) *
+      (boostOn('golden') ? TUNE.golden : 1);
     if (st.price > c._wtp) { balk(c, 'pricey'); return; }
     if (!roomFor(c)) { c._hover = true; return; }          // long line: they eye it as they walk up
     c.state = 'approach'; c.stateT = 0; c.mood = 0.2;
@@ -611,7 +721,8 @@
   }
   /** Is the line short enough for this customer's patience? */
   function roomFor(c) {
-    var most = clamp(Math.floor(c._pat * rt.patMul * TUNE.lineTolerance / linePerPerson()), 1, TUNE.maxQueue);
+    var extra = c.regularId ? TUNE.regLine : 0;
+    var most = clamp(Math.floor(c._pat * rt.patMul * TUNE.lineTolerance / linePerPerson()) + extra, 1, TUNE.maxQueue + extra);
     return rt.today.queue.length + 0.5 * rt.approaching < most;      // people still walking over only half count
   }
   /** Wanted a drink but the line was too long: join if it has shrunk, give up once they have walked past it. */
@@ -692,6 +803,7 @@
     st.lifetimeCups += qty;
     rt.served++;
     c.qty = qty; c.hasDrink = true;
+    var bonus = c.regularId && c.mult > 1 ? r2(price * qty * (c.mult - 1)) : 0;
     // what they will say about it in a moment
     var t = taste(k.sweet, td.weatherNow.temp), tScore = clamp(t.score + (rng() - 0.5) * 0.1, 0, 1), issue = t.issue;
     var ratio = c._wtp / Math.max(0.01, price);
@@ -712,6 +824,14 @@
     sendAway(c);
     emit('sale', { c: c, price: price, qty: qty, x: x, lane: lane });
     emit('cash', { amount: st.cash, delta: paid, reason: 'sale' });
+    if (bonus > 0) {                                  // a regular's loyalty bonus, on top of the price
+      c._bonus = bonus;
+      st.cash = r2(st.cash + bonus);
+      st.lifetimeEarnings = r2(st.lifetimeEarnings + bonus);
+      td.loyalty = r2(td.loyalty + bonus);
+      emit('loyalty', { c: c, amount: bonus, mult: c.mult });
+      emit('cash', { amount: st.cash, delta: bonus, reason: 'loyalty' });
+    }
   }
 
   function flushRep() {
@@ -753,11 +873,94 @@
     }
     var jar = upLevel('tipjar');
     if (rv.mood > 0.25 && rng() < k.tip * (0.6 + rv.mood) * rt.ev.tips * (jar ? 1.25 : 1)) {
-      var amount = Math.max(0.05, r05(rv.paid * (0.1 + 0.2 * rng()) * (jar >= 2 ? 1.6 : 1) * (vip ? 2 : 1)));
+      var amount = Math.max(0.05, r05(rv.paid * (0.1 + 0.2 * rng()) * (jar >= 2 ? 1.6 : 1) * (vip ? 2 : 1) * (boostOn('lucky') ? TUNE.lucky : 1)));
       var tip = { id: rt.tipId++, x: c.x, lane: c.lane, amount: amount, ttl: TUNE.tipTtl };
       if (jar || closing) collect(tip, true);
       else { td.tips.push(tip); emit('tip:drop', { tip: tip }); }
     }
+    if (c.regularId) {
+      if (rv.mood >= TUNE.regHappy || rv.kind === 'great' || rv.kind === 'cheap') regularGood(c);
+      else regularBad(c, rv.kind === 'pricey' || rv.kind === 'slow' ? rv.kind : 'taste');
+    } else if (!vip) maybeRegular(c, rv);
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Regulars
+   * ------------------------------------------------------------------ */
+  function schedFor(id) { for (var i = 0; i < rt.sched.length; i++) if (rt.sched[i].id === id) return rt.sched[i]; return null; }
+  function nextRegId(st) {
+    var n = Math.max(1, Math.floor(fin(st.nextRegular, 1)));
+    st.regulars.forEach(function (g) { n = Math.max(n, idNum(g.id) + 1); });
+    st.nextRegular = n + 1;
+    return 'r' + n;
+  }
+  /** One row per regular on today's results; settled visits only ever write it once. */
+  function regRow(g, outcome, reason, c) {
+    var row = { id: g.id, name: g.name, kind: g.kind, outcome: outcome, streak: g.streak, mult: SS.loyaltyMult(g.streak), bonus: c ? c._bonus : 0, reason: reason };
+    for (var i = 0; i < rt.regRows.length; i++) if (rt.regRows[i].id === g.id) { rt.regRows[i] = row; return; }
+    rt.regRows.push(row);
+  }
+  /** The Regular whose visit this customer is, if that visit is still open (each regular settles once a day). */
+  function openVisit(c) {
+    var e = c.regularId && rt ? schedFor(c.regularId) : null, g = e && !e.done && e.cid === c.id ? regById(c.regularId) : null;
+    if (g) e.done = true;
+    return g;
+  }
+  function regularGood(c) {
+    var st = SS.state, g = openVisit(c);
+    if (!g) return;
+    g.streak++; g.best = Math.max(g.best, g.streak); g.visits++; g.strikes = 0; g.lastDay = st.day;
+    st.stats.bestStreak = Math.max(st.stats.bestStreak || 0, g.best);
+    regRow(g, 'streak', '', c);
+    emit('regular:streak', { regular: g, c: c, streak: g.streak, mult: SS.loyaltyMult(g.streak) });
+  }
+  function regularBad(c, reason) {
+    var st = SS.state, g = openVisit(c);
+    if (!g) return;
+    var shielded = boostOn('shield') && !rt.shieldUsed;
+    g.visits++; g.lastDay = st.day;
+    if (shielded) rt.shieldUsed = true;
+    else { g.streak = 0; g.strikes++; }
+    var lost = g.strikes >= 2;
+    regRow(g, shielded ? 'saved' : lost ? 'lost' : 'broken', reason, c);
+    emit('regular:broken', { regular: g, c: c, reason: reason, shielded: shielded });
+    if (lost) {
+      st.regulars.splice(st.regulars.indexOf(g), 1);
+      emit('regular:lost', { regular: g });
+    }
+  }
+  /** A delighted customer may decide to come back on other days. */
+  function maybeRegular(c, rv) {
+    var st = SS.state, regs = st.regulars, names = D.regularNames[c.kind], rng = rt.rng;
+    if (!names || rv.mood < TUNE.regMood || (rv.kind !== 'great' && rv.kind !== 'cheap')) return;
+    if (regs.length >= TUNE.regCap || rt.newRegs >= TUNE.regPerDay || rng() >= TUNE.regChance * (1 - regs.length / TUNE.regCap)) return;
+    var free = names.filter(function (n) { return !regs.some(function (g) { return g.name === n; }); });
+    if (!free.length) return;
+    var g = { id: nextRegId(st), name: free[Math.floor(rng() * free.length) % free.length], kind: c.kind, seed: c.seed,
+      streak: 1, best: 1, visits: 1, strikes: 0, since: st.day, lastDay: st.day };
+    regs.push(g);
+    rt.newRegs++;
+    rt.sched.push({ id: g.id, at: rt.today.t, dir: c.dir, cid: c.id, done: true });
+    st.stats.bestStreak = Math.max(st.stats.bestStreak || 0, 1);
+    c.regularId = g.id; c.streak = 1; c.mult = SS.loyaltyMult(1);
+    regRow(g, 'new', '', null);
+    emit('regular:new', { regular: g, c: c });
+  }
+  /** A scheduled regular walks in from the edge of the street. */
+  function arriveRegular(e) {
+    var g = regById(e.id);
+    e.cid = -1;                                    // one arrival per day, even if they are gone
+    if (!g) return;
+    var c = spawn(g.kind, e.dir > 0 ? bounds.min : bounds.max, e.dir, g);
+    e.cid = c.id;
+    emit('regular:visit', { regular: g, c: c });
+  }
+  /** Hype Squad bought mid-day: everyone not already coming today turns up later on. */
+  function hypeRest(st) {
+    var td = rt.today, from = Math.min(0.93, td.t + 0.02);
+    st.regulars.forEach(function (g) {
+      if (!schedFor(g.id)) rt.sched.push({ id: g.id, at: lerp(from, Math.max(from, TUNE.regLast), rt.rng()), dir: rt.rng() < 0.5 ? 1 : -1, cid: 0, done: false });
+    });
   }
 
   function triggerSurprise() {
@@ -812,7 +1015,7 @@
       }
     }
     var wxId = td.weatherNow.type, temp = td.weatherNow.temp;
-    if (st.stock.ice > 0) {
+    if (st.stock.ice > 0 && !boostOn('frost')) {
       var melt = clamp(TUNE.meltBase + (temp - 22) * 0.012, 0.06, 0.45) * (1 - clamp(upVal('cooler'), 0, 1));
       st.stock.ice = Math.max(0, st.stock.ice - rt.iceStart * melt * dt / DAY);
     }
@@ -833,6 +1036,7 @@
         var d1 = rng() < 0.5 ? 1 : -1; spawn(rng() < 0.85 ? 'kid' : 'parent', d1 > 0 ? bounds.min : bounds.max, d1);
       }
       if (rt.vipAt >= 0 && td.t >= rt.vipAt) { rt.vipAt = -1; var d2 = rng() < 0.5 ? 1 : -1; spawn('vip', d2 > 0 ? bounds.min : bounds.max, d2); }
+      for (i = 0; i < rt.sched.length; i++) if (!rt.sched[i].cid && td.t >= rt.sched[i].at && list.length < TUNE.cap + 8) arriveRegular(rt.sched[i]);
     }
 
     /* pitcher --------------------------------------------------------- */
@@ -909,6 +1113,7 @@
         nudgeRep(-TUNE.quitRep);
         if (c.kind === 'vip') rt.vipSeen = true;
         emit('customer:quit', { c: c });
+        if (c.regularId) regularBad(c, 'quit');
         i--;
       } else if (c.patience < 0.33 && !c._warned) { c._warned = true; if (!c.bubble) setBubble(c, 'wait', 1.8); }
     }
@@ -949,8 +1154,15 @@
   /* ------------------------------------------------------------------ *
    * Results
    * ------------------------------------------------------------------ */
+  /** A Frost Pack covers the night after the day it was used. */
+  function frostNight(st) {
+    if (st.phase === 'day') return boostOn('frost');
+    var lr = st.lastResult;
+    return !!lr && lr.day === st.day && Array.isArray(lr.boosts) && lr.boosts.indexOf('frost') >= 0;
+  }
   function spoilage(st) {
-    return { lemons: Math.floor(st.stock.lemons * TUNE.lemonSpoil), ice: Math.floor(st.stock.ice * (1 - clamp(upVal('cooler'), 0, 1)) + 1e-9) };
+    return { lemons: Math.floor(st.stock.lemons * TUNE.lemonSpoil),
+      ice: frostNight(st) ? 0 : Math.floor(st.stock.ice * (1 - clamp(upVal('cooler'), 0, 1)) + 1e-9) };
   }
 
   function milestoneValue(m, st) {
@@ -963,6 +1175,8 @@
       case 'location': return st.unlockedLocations.indexOf(m.target) >= 0 ? 1 : 0;
       case 'flavors': return st.flavors.length;
       case 'lifetime': return st.lifetimeEarnings;
+      case 'regulars': return st.regulars ? st.regulars.length : 0;
+      case 'streak': return st.stats.bestStreak || 0;
     }
     return 0;
   }
@@ -1090,7 +1304,17 @@
 
     var m = td.missed, considered = rt.served + m.pricey + m.wait + m.soldout + m.quit;
     var revenue = r2(td.revenue), tips = r2(td.tipsEarned), cost = r2(rt.cost + rt.flavorCost);
-    var profit = r2(revenue + tips - cost - rt.rent);
+    var loyalty = r2(td.loyalty), boostCost = r2(st.boostCost || 0);
+    var profit = r2(revenue + tips + loyalty - cost - rt.rent - boostCost);
+    // regulars still on their way in or in line at closing came by (streak kept);
+    // those who stayed away are listed when they had a streak worth noticing
+    st.regulars.forEach(function (g) {
+      var listed = false, e = schedFor(g.id);
+      rt.regRows.forEach(function (r) { if (r.id === g.id) listed = true; });
+      if (listed) return;
+      if (e && !e.done && e.cid > 0) { e.done = true; g.visits++; g.lastDay = st.day; regRow(g, 'closed', '', null); }
+      else if (g.streak >= 3) regRow(g, 'away', '', null);
+    });
     var top = topFeedback(td, considered);
     var res = {
       day: st.day, location: st.location, weather: { type: st.weather.type, temp: st.weather.temp }, event: st.event,
@@ -1100,9 +1324,12 @@
       repBefore: rt.repBefore, repAfter: st.reputation,
       reviews: pickReviews(top), topFeedback: top, advice: '',
       hourly: td.hourly.slice(), spoiled: spoilage(st), milestones: [],
-      bestDay: st.stats.days > 0 && profit > 0 && profit > st.stats.bestProfit, cashAfter: 0
+      bestDay: st.stats.days > 0 && profit > 0 && profit > st.stats.bestProfit, cashAfter: 0,
+      loyalty: loyalty, boostCost: boostCost, boosts: st.boosts.slice(), regulars: rt.regRows
     };
     res.advice = adviceFor(top, st, td, res);
+    st.boosts = [];
+    st.boostCost = 0;
 
     st.stats.days++;
     st.stats.bestProfit = Math.max(st.stats.bestProfit, profit);
@@ -1229,6 +1456,9 @@
     if (!st || !d) return { ok: false, reason: 'That place does not exist.' };
     if (!shopOpen(st)) return { ok: false, reason: 'You can move the stand before you open, not while it is open.' };
     if (st.unlockedLocations.indexOf(id) < 0) return { ok: false, reason: 'Unlock ' + d.name + ' first.' };
+    if (st.location !== id && st.phase === 'prep' && st.boosts && st.boosts.length) {
+      return { ok: false, reason: 'Dex priced your boosts for ' + locDef(st.location).name + ', so you open there today.' };
+    }
     if (st.location !== id) {
       st.location = id;
       emit('location:set', { id: id });
@@ -1243,7 +1473,8 @@
     if (!st || !f) return { owned: false, current: false, canBuy: false, reason: 'That flavor does not exist.' };
     var owned = st.flavors.indexOf(id) >= 0, reason = '';
     if (!owned) {
-      if (st.reputation + 1e-9 < f.repReq) reason = f.name + ' needs ' + stars(f.repReq) + ' stars. You have ' + stars(Math.floor(st.reputation * 10) / 10) + '.';
+      if (f.limited) reason = 'Only Dex the Dealer sells this, and only on some days.';
+      else if (st.reputation + 1e-9 < f.repReq) reason = f.name + ' needs ' + stars(f.repReq) + ' stars. You have ' + stars(Math.floor(st.reputation * 10) / 10) + '.';
       else if (st.cash + 1e-9 < f.cost) reason = 'You need ' + money(f.cost - st.cash) + ' more for ' + f.name + '.';
     }
     return { owned: owned, current: st.flavor === id, canBuy: !owned && !reason, reason: reason };
@@ -1266,6 +1497,116 @@
     persist(true);
     return { ok: true, reason: '' };
   }
+
+  /* ------------------------------------------------------------------ *
+   * Regulars and Dex the Dealer
+   * ------------------------------------------------------------------ */
+  function regularsInfo() {
+    var st = SS.state;
+    if (!st || !Array.isArray(st.regulars)) return [];
+    return st.regulars.map(function (g) {
+      return { id: g.id, name: g.name, kind: g.kind, seed: g.seed, streak: g.streak, best: g.best, visits: g.visits,
+        mult: SS.loyaltyMult(g.streak), since: g.since, lastDay: g.lastDay };
+    }).sort(function (a, b) { return b.streak - a.streak || b.best - a.best || a.since - b.since; });
+  }
+
+  /** Does Dex carry a limited flavor today? Pure (seed, day): about limitedChance of days, never more than limitedPity apart. */
+  function limitedDay(seed, day) {
+    if (day < 3) return false;
+    var from = Math.max(3, day - 400), last = from - 3, d;
+    for (d = from; d <= day; d++) if (d - last >= TUNE.limitedPity || dayRng(seed, d, 37)() < TUNE.limitedChance) last = d;
+    return last === day;
+  }
+  /** '' or why a boost would do nothing for this player right now */
+  function boostUseless(id, st) {
+    if ((id === 'shield' || id === 'hype') && !(st.regulars && st.regulars.length)) return 'You do not have any regulars yet, so this would do nothing.';
+    if (id === 'frost' && upVal('cooler') >= 1) return 'Your mini freezer already keeps every cube frozen.';
+    if (id === 'hype' && st.phase === 'day' && rt && rt.today && rt.today.t > TUNE.regLast - 0.05) return 'Too late in the day. Your regulars could not get here before closing.';
+    if (id === 'hype' && st.phase === 'day' && rt && rt.sched && st.regulars.every(function (g) { return !!schedFor(g.id); })) return 'All your regulars are already coming by today.';
+    return '';
+  }
+  /** Dex restocks once a day, from day 2; a reload never re-rolls today's stock. */
+  function rollDealer(st) {
+    if (st.day < 2) { st.dealer = null; return; }
+    if (st.dealer && st.dealer.day === st.day) return;
+    var r = dayRng(st.seed, st.day, 31), pool = [], offers = [], i;
+    D.boosts.forEach(function (b) { if (!boostUseless(b.id, st)) pool.push(b.id); });
+    for (i = 0; i < 3 && pool.length; i++) offers.push({ id: pool.splice(Math.floor(r() * pool.length) % pool.length, 1)[0], kind: 'boost', sold: false });
+    if (limitedDay(st.seed, st.day)) {
+      var lim = D.flavors.filter(function (f) { return f.limited && st.flavors.indexOf(f.id) < 0; }).sort(function (a, b) { return a.cost - b.cost; });
+      var u = r(), k = Math.min(lim.length - 1, u < 0.6 ? 0 : u < 0.88 ? 1 : 2);      // usually the cheapest you do not have yet
+      if (lim.length) offers.push({ id: lim[k].id, kind: 'limited', sold: false });
+    }
+    st.dealer = { day: st.day, offers: offers };
+  }
+  function dealerHere(st) {
+    return !!st && (st.phase === 'prep' || st.phase === 'day') && st.day >= 2 && !!st.dealer && st.dealer.day === st.day && Array.isArray(st.dealer.offers);
+  }
+  function dealCost(st, o) {
+    if (o.kind === 'limited') return flavorDef(o.id).cost;
+    var s = TUNE.dealerScale[locIndex(st.location)] || 1;
+    return Math.max(0.5, Math.round(boostDef(o.id).cost * s * 2) / 2);
+  }
+  function dealReason(st, o) {
+    if (!dealerHere(st)) return 'Dex is not around right now.';
+    if (st.phase === 'day' && (!rt || rt.closing)) return 'The stand is closing. Dex will be back tomorrow.';
+    if (o.sold) return 'Sold out. Dex will have fresh stock tomorrow.';
+    if (o.kind === 'boost') {
+      if (boostOn(o.id)) return 'Already working for you today.';
+      var why = boostUseless(o.id, st);
+      if (why) return why;
+    } else if (st.flavors.indexOf(o.id) >= 0) return 'You already have ' + flavorDef(o.id).name + '.';
+    var cost = dealCost(st, o), keep = st.phase === 'prep' ? loanNeed(st) : 0;
+    if (st.cash + 1e-9 < cost) return 'You need ' + money(cost - st.cash) + ' more for that.';
+    return st.cash - cost + 1e-9 < keep ? 'Keep ' + money(keep) + ' for supplies first. You would have ' + money(st.cash - cost) + ' left.' : '';
+  }
+  function dexLine(st) {
+    var left = 0, lim = null, pool;
+    st.dealer.offers.forEach(function (o) { if (!o.sold) { left++; if (o.kind === 'limited') lim = flavorDef(o.id).name; } });
+    pool = !left && st.dealer.offers.length ? DEX.sold : lim ? DEX.limited : DEX.any;
+    return pool[Math.floor(dayRng(st.seed, st.day, 41)() * pool.length) % pool.length].replace('{name}', lim || '');
+  }
+  function dealerInfo() {
+    var st = SS.state, active = st && Array.isArray(st.boosts) ? st.boosts.slice() : [];
+    if (!dealerHere(st)) return { present: false, line: '', offers: [], active: active };
+    return {
+      present: true, line: dexLine(st), active: active,
+      offers: st.dealer.offers.map(function (o) {
+        var lim = o.kind === 'limited', d = lim ? flavorDef(o.id) : boostDef(o.id), why = dealReason(st, o);
+        return { id: o.id, kind: o.kind, name: d.name, icon: lim ? 'drink' : d.icon, color: d.color, cost: dealCost(st, o), sold: o.sold, canBuy: !why, reason: why,
+          desc: lim ? d.blurb + ' People pay about ' + Math.round(d.wtp * 100) + '% more for it, and it is yours to keep.' : d.desc };
+      })
+    };
+  }
+  function buyDeal(id) {
+    var st = SS.state, o = null;
+    if (!st) return { ok: false, reason: 'Start a game first.' };
+    if (!dealerHere(st)) return { ok: false, reason: st.phase === 'results' ? 'Dex has packed up for the night. He will be back in the morning.' : 'Dex is not around right now.' };
+    st.dealer.offers.forEach(function (x) { if (x.id === id) o = x; });
+    if (!o) return { ok: false, reason: 'Dex does not have that today.' };
+    var why = dealReason(st, o), cost = dealCost(st, o);
+    if (why) return { ok: false, reason: why };
+    st.cash = r2(st.cash - cost);
+    o.sold = true;
+    emit('dealer:buy', { id: id, kind: o.kind, cost: cost });
+    if (o.kind === 'boost') {
+      if (!Array.isArray(st.boosts)) st.boosts = [];
+      st.boosts.push(id);
+      st.boostCost = r2((st.boostCost || 0) + cost);
+      if (id === 'hype' && st.phase === 'day') hypeRest(st);
+      emit('boost:on', { id: id });
+    } else {
+      st.flavors.push(id);
+      emit('flavor:buy', { id: id });
+      if (st.phase === 'prep') { st.flavor = id; emit('flavor:set', { id: id }); }     // you bought it to pour it
+    }
+    emit('cash', { amount: st.cash, delta: -cost, reason: 'dealer' });
+    shopMilestones();
+    afterPrepSpend(st);
+    persist(true);
+    return { ok: true, reason: '' };
+  }
+  function boostActive(id) { return boostOn(id); }
 
   function milestoneProgress(id) {
     var st = SS.state, m = D.byId(D.milestones, id);
@@ -1309,7 +1650,7 @@
       st.event = m.event && m.event.known ? m.event : null;
       if (st.phase === 'prep') st.weather = { type: m.forecast.type, temp: m.forecast.temp };
     }
-    if (st.phase === 'prep') trimCart(st);
+    if (st.phase === 'prep') { trimCart(st); rollDealer(st); }     // older saves have no dealer yet
     emit('phase', { from: from, to: st.phase });
     return true;
   }
@@ -1342,6 +1683,7 @@
     nextDay: nextDay,
     upgradeInfo: upgradeInfo, buyUpgrade: buyUpgrade, locationInfo: locationInfo, unlockLocation: unlockLocation, setLocation: setLocation,
     flavorInfo: flavorInfo, buyFlavor: buyFlavor, milestoneProgress: milestoneProgress,
+    regularsInfo: regularsInfo, dealerInfo: dealerInfo, buyDeal: buyDeal, boostActive: boostActive,
     cupsPerPitcher: cupsPerPitcher, brewTime: brewTime, serveTime: serveTime, rent: rent,
     TUNE: TUNE
   };

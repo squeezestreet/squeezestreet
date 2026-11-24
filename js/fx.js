@@ -77,14 +77,16 @@
       g.fillStyle = gr; g.fillRect(-16, -16, 32, 32);
     });
   }
-  function coinSprite(i, n) {
+  var GOLD = ['#c47d00', '#ffc928', '#e39a00'], ROSE = ['#b5574a', '#ffb39c', '#e5826d'];   // rim, face, inner ring
+  function coinSprite(i, n, pal) {
+    pal = pal || GOLD;
     return mk(26, 26, function (g) {
       var a = i / n * Math.PI, cw = Math.abs(Math.cos(a)), rx = Math.max(1.5, 10 * cw), ed = 3.2 * Math.sin(a);
       g.fillStyle = INK; disc(g, 0, 0, rx + 1.9 + ed * 0.5, 11.9);
-      g.fillStyle = '#c47d00'; disc(g, ed * 0.5, 0, rx, 10);                 // the rim, seen edge-on
-      g.fillStyle = '#ffc928'; disc(g, -ed * 0.5, 0, rx, 10);                // the face
+      g.fillStyle = pal[0]; disc(g, ed * 0.5, 0, rx, 10);                    // the rim, seen edge-on
+      g.fillStyle = pal[1]; disc(g, -ed * 0.5, 0, rx, 10);                   // the face
       if (cw > 0.3) {
-        g.strokeStyle = '#e39a00'; g.lineWidth = 1.6; g.beginPath(); g.ellipse(-ed * 0.5, 0, rx * 0.62, 6.2, 0, 0, TAU); g.stroke();
+        g.strokeStyle = pal[2]; g.lineWidth = 1.6; g.beginPath(); g.ellipse(-ed * 0.5, 0, rx * 0.62, 6.2, 0, 0, TAU); g.stroke();
         g.fillStyle = 'rgba(255,255,255,.8)'; disc(g, -ed * 0.5 - rx * 0.36, -4.2, rx * 0.2, 2.6, -0.5);
       }
     });
@@ -127,6 +129,23 @@
     });
   }
 
+  function heartShape(g) {
+    g.beginPath(); g.moveTo(0, -4); g.bezierCurveTo(-3, -10, -11, -8, -10, -1); g.bezierCurveTo(-9.5, 4, -3, 7, 0, 10.5);
+    g.bezierCurveTo(3, 7, 9.5, 4, 10, -1); g.bezierCurveTo(11, -8, 3, -10, 0, -4); g.closePath();
+  }
+  /** one half of a heart broken along a zigzag; side -1 left, 1 right (centred on the half) */
+  function halfHeart(side) {
+    return mk(20, 28, function (g) {
+      g.translate(-side * 5, 0);
+      g.save(); g.beginPath(); g.moveTo(0, -12); g.lineTo(2.6, -6); g.lineTo(-1.8, -1); g.lineTo(2.2, 4); g.lineTo(0, 12);
+      g.lineTo(side * 14, 12); g.lineTo(side * 14, -12); g.closePath(); g.clip();
+      heartShape(g); inked(g, '#ff5d8f', 2.2);
+      if (side < 0) { g.fillStyle = 'rgba(255,255,255,.75)'; disc(g, -5.2, -3.6, 2.2, 1.5, -0.6); }
+      heartShape(g); g.clip();                            // ink the broken edge, inside the heart only
+      g.strokeStyle = INK; g.lineWidth = 4.4; g.beginPath(); g.moveTo(0, -12); g.lineTo(2.6, -6); g.lineTo(-1.8, -1); g.lineTo(2.2, 4); g.lineTo(0, 12); g.stroke();
+      g.restore();
+    });
+  }
   function build() {
     if (S) return true;
     if (typeof document === 'undefined') return false;
@@ -138,7 +157,7 @@
       gr.addColorStop(0, 'rgba(255,240,170,1)'); gr.addColorStop(0.4, 'rgba(255,196,40,.85)'); gr.addColorStop(1, 'rgba(255,160,0,0)');
       g.fillStyle = gr; g.fillRect(-12, -12, 24, 24);
     });
-    s.coin = []; for (i = 0; i < 8; i++) s.coin.push(coinSprite(i, 8));
+    s.coin = []; s.rose = []; for (i = 0; i < 8; i++) { s.coin.push(coinSprite(i, 8)); s.rose.push(coinSprite(i, 8, ROSE)); }
     s.sparkle = mk(32, 32, function (g) {
       var gr = g.createRadialGradient(0, 0, 0, 0, 0, 16);
       gr.addColorStop(0, 'rgba(255,244,184,.9)'); gr.addColorStop(0.35, 'rgba(255,216,61,.32)'); gr.addColorStop(1, 'rgba(255,216,61,0)');
@@ -152,6 +171,19 @@
       g.bezierCurveTo(3, 7, 9.5, 4, 10, -1); g.bezierCurveTo(11, -8, 3, -10, 0, -4); g.closePath();
       inked(g, '#ff5d8f', 2.2);
       g.fillStyle = 'rgba(255,255,255,.75)'; disc(g, -5.2, -3.6, 2.2, 1.5, -0.6);
+    });
+    s.heartL = halfHeart(-1); s.heartR = halfHeart(1);
+    s.ghost = mk(28, 28, function (g) { heartShape(g); g.fillStyle = 'rgba(255,214,228,.9)'; g.fill(); g.strokeStyle = 'rgba(27,31,59,.45)'; g.lineWidth = 2; g.stroke(); });
+    s.flame = mk(22, 30, function (g) {                   // tail up, round end down
+      g.beginPath(); g.moveTo(0, -13); g.bezierCurveTo(4, -6, 9, -3, 8.4, 4); g.arc(0, 4, 8.4, 0, Math.PI); g.bezierCurveTo(-9, -2, -3, -5, 0, -13); g.closePath();
+      inked(g, '#ff7a1a', 2);
+      g.beginPath(); g.moveTo(0, -4); g.quadraticCurveTo(5, 1, 4.4, 5.5); g.arc(0, 5.5, 4.4, 0, Math.PI); g.quadraticCurveTo(-5, 1, 0, -4); g.fillStyle = '#ffd83d'; g.fill();
+    });
+    s.shield = mk(40, 46, function (g) {
+      g.beginPath(); g.moveTo(0, -19); g.quadraticCurveTo(9, -14, 17, -15); g.quadraticCurveTo(18, 8, 0, 20); g.quadraticCurveTo(-18, 8, -17, -15); g.quadraticCurveTo(-9, -14, 0, -19); g.closePath();
+      inked(g, '#4cc3f0', 2.6);
+      g.beginPath(); g.moveTo(0, -13); g.quadraticCurveTo(6, -10, 11.5, -10.5); g.quadraticCurveTo(12, 5, 0, 13.5); g.closePath(); g.fillStyle = 'rgba(255,255,255,.35)'; g.fill();
+      g.save(); g.translate(0, -1); g.scale(0.78, 0.78); heartShape(g); inked(g, '#ff5d8f', 2.4); g.restore();
     });
     s.star = mk(30, 30, function (g) {
       g.beginPath();
@@ -282,7 +314,13 @@
     shell: { spr: 'glowW', z: 2, v0: 0, v1: 0, l0: 1, l1: 1, s0: 0.55, s1: 0.55, str: 0.004, fo: 0.05, force: 1 },
     fw: { spr: 'glow', z: 2, v0: 50, v1: 340, g: 110, drag: 1.7, l0: 0.85, l1: 1.5, s0: 0.6, s1: 1.1, e: 0.25, str: 0.011, fo: 0.5 },
     fwRing: { spr: 'glow', z: 2, v0: 268, v1: 288, g: 110, drag: 1.7, l0: 0.95, l1: 1.35, s0: 0.8, s1: 1, e: 0.25, str: 0.011, fo: 0.5 },
-    fall: { spr: 'sparkle', z: 2, v0: 20, v1: 130, g: 75, drag: 1.5, l0: 1.3, l1: 2.2, s0: 0.3, s1: 0.6, e: 0.4, tw: 1, fl: 9, vr: 2, fo: 0.5 }
+    fall: { spr: 'sparkle', z: 2, v0: 20, v1: 130, g: 75, drag: 1.5, l0: 1.3, l1: 2.2, s0: 0.3, s1: 0.6, e: 0.4, tw: 1, fl: 9, vr: 2, fo: 0.5 },
+    // regulars and Dex
+    flame: { spr: 'flame', a: -HALF, sp: 1.3, v0: 60, v1: 170, g: -140, drag: 1.8, l0: 0.45, l1: 0.8, s0: 0.55, s1: 1, e: 0.15, rot: 0.4, sway: 16, fl: 10, pop: 1, j: 12 },
+    shieldPop: { spr: 'shield', v0: 0, v1: 0, g: -40, l0: 1, l1: 1, s0: 1.35, s1: 1.35, e: 1.12, pop: 1, fo: 0.35, force: 1 },
+    ghost: { spr: 'ghost', a: -HALF, sp: 0.3, v0: 26, v1: 36, g: -8, drag: 0.4, l0: 1.7, l1: 1.7, s0: 1, s1: 1, e: 0.75, al: 0.8, fi: 0.15, fo: 0.85, sway: 10, fl: 3, rot: 0.3 },
+    soft: { spr: 'puff', v0: 10, v1: 45, g: -24, drag: 2, l0: 0.9, l1: 1.4, s0: 0.45, s1: 0.65, e: 2.3, al: 0.45, fo: 0.9, vr: 0.6, j: 14 },
+    mote: { spr: 'glow', z: 2, a: -HALF, sp: 1.6, v0: 40, v1: 130, g: -70, drag: 1.3, l0: 0.6, l1: 1.05, s0: 0.45, s1: 0.85, e: 0.2, j: 70 }
   };
 
   /** scale a particle count for reduced motion and for how full the pool is */
@@ -769,6 +807,105 @@
     if (!(p.delta < 0)) return;
     var q = aim(null, 'hud-cash');
     emit(R.coin, clamp(1 + -p.delta / 4, 2, 8), q.x, q.y);
+  });
+
+  /* Regulars and Dex the Dealer -------------------------------------- */
+  var bglow = {}, lastBoost = -1e9, boostN = 0, D = { x: 0, y: 0 };
+  function boostHex(id) { var b = SS.DATA && SS.DATA.boosts && SS.DATA.byId(SS.DATA.boosts, id); return b && /^#[0-9a-f]{6}$/i.test(b.color) ? b.color : '#ffd83d'; }
+  function boostGlow(c) {
+    var n;
+    if (!bglow[c]) { n = parseInt(c.slice(1), 16); bglow[c] = glowSprite([n >> 16 & 255, n >> 8 & 255, n & 255]); }
+    return bglow[c];
+  }
+  /** the customer behind a regulars event: p.c, else whoever on screen is that regular */
+  function regCust(p) {
+    var r = p.regular, st = SS.state, l = st && st.today && st.today.customers, i;
+    if (p.c) return p.c;
+    if (r && r.id && l) for (i = 0; i < l.length; i++) if (l[i] && l[i].regularId === r.id) return l[i];
+    return p;
+  }
+  /** a heart that holds for a beat, then cracks in two and the halves tumble away */
+  function heartBreak(x, y) {
+    var k, p = emit(R.pop, 1, x, y, null, 1, S.glows[5]);
+    if ((p = fresh(true))) { p.spr = S.heart; p.x = x; p.y = y; p.life = 0.16; p.s0 = p.s1 = 1.3 * U; p.pop = 1; p.fo = 0.01; }
+    for (k = -1; k <= 1; k += 2) {
+      if (!(p = fresh(true))) return;
+      p.spr = k < 0 ? S.heartL : S.heartR; p.x = x + k * 5 * U; p.y = y;
+      p.vx = k * (60 + rnd() * 30) * U; p.vy = -(120 + rnd() * 40) * U; p.g = 640 * U; p.drag = 0.4;
+      p.vr = k * (2.5 + rnd()); p.life = 0.95; p.s0 = p.s1 = 1.3 * U; p.fo = 0.4; p.delay = 0.15;
+    }
+  }
+  on('regular:new', function (p) {
+    var q = cust(regCust(p), 1.02), x = q.x, y = q.y;
+    emit(R.heart, 7, x, y); emit(R.twinkle, 6, x, y); emit(R.pop, 1, x, y, null, 1.2, S.glows[5]);
+    ring(x, y, 6, 64 * U, 0.5, '#ff5d8f', 4);
+    FX.floatText('New regular!', x, y - 34 * U, { color: '#ff8fb3', size: 24 });
+  });
+  on('regular:streak', function (p, V) {
+    var q = cust(regCust(p), 1.02), x = q.x, y = q.y, r = p.regular || {}, spr, size, sx;
+    var n = num(p.streak) ? p.streak : num(r.streak) ? r.streak : 0, m = num(p.mult) ? p.mult : SS.loyaltyMult(n);
+    var big = n === 5 || n === 10 || n === 20;
+    emit(R.flame, big ? 16 : 8, x, y); emit(R.spark, big ? 8 : 4, x, y);
+    FX.floatText(n ? 'Streak ' + n + '! ' + SS.fmtMult(m) : 'Streak up!', x, y - 34 * U, { color: '#ffd83d', size: big ? (n >= 10 ? 32 : 28) : 24 });
+    if (!big) return;
+    starBurst(x, y, n >= 10 ? 1.25 : 0.9);
+    ring(x, y, 10, (n >= 10 ? 130 : 90) * U, 0.6, '#ff9f43', 6, 0.08);
+    if (n >= 10) {
+      emit(R.confetti, n >= 20 ? 110 : 60, x, y - 10 * U);
+      size = stampSize(0.42); spr = textSprite(n + ' IN A ROW!', size, '#ff9f43', true); sx = clamp(x, spr.w / 2 + 8, Math.max(spr.w / 2 + 8, V.w - spr.w / 2 - 8));
+      stamp(n + ' IN A ROW!', sx, Math.max(spr.h, y - 110 * U), { color: '#ff9f43', size: size, framed: true, rot: -0.06, max: 1.4, delay: 0.25, hit: lowMo ? 0 : 1 });
+    }
+    if (n >= 20) { flash('#ffd83d', 0.22, 0.45); FX.shake(4, 0.25); }
+  });
+  on('regular:broken', function (p) {
+    var q = cust(regCust(p), 1.02), x = q.x, y = q.y;
+    if (p.shielded) {                                     // the Streak Shield took the hit
+      emit(R.shieldPop, 1, x, y - 8 * U); emit(R.boom, 1, x, y, null, 1, S.glows[3]);
+      ring(x, y, 8, 74 * U, 0.5, '#4cc3f0', 6); ring(x, y, 8, 52 * U, 0.4, '#ffffff', 3, 0.08);
+      emit(R.twinkle, 8, x, y);
+      FX.floatText('Shield saved it!', x, y - 40 * U, { color: '#8fdcff', size: 24 });
+    } else {
+      heartBreak(x, y); emit(R.puff, 4, x, y);
+      FX.floatText('Streak lost', x, y - 34 * U, { color: '#c9cde6', size: 22 });
+    }
+  });
+  on('regular:lost', function (p) {
+    var q = cust(regCust(p), 1.02);
+    emit(R.soft, 6, q.x, q.y); emit(R.ghost, 1, q.x, q.y - 6 * U);
+  });
+  on('loyalty', function (p, V) {
+    var q = cust(p, 0.95), x = q.x, y = q.y, amt = num(p.amount) ? p.amount : 0;
+    fly(x, y, aim(null, 'hud-cash'), clamp(Math.round(2 + amt * 3), 2, 7), S.rose, true);
+    emit(R.twinkle, 3, x, y);
+    if (amt > 0) FX.floatText('+' + SS.fmtMoney(amt) + ' loyalty', x, y - W.CHAR_H * V.scale * 0.6, { size: 18, color: '#ffb39c' });
+  });
+  on('dealer:buy', function (p, V) {
+    var d = SS.Actors && SS.Actors.dealerPos ? SS.Actors.dealerPos() : null, size = stampSize(0.5), x, y, tx, ty, q, el, r, c, spr;
+    if (d && num(d.x) && num(d.y)) { x = d.x; y = d.y - (num(d.h) ? d.h : 120 * V.scale) * 0.6; tx = num(d.tx) ? d.tx : x; ty = num(d.ty) ? d.ty : y; }
+    else { q = stage(); x = tx = q.x; y = ty = q.y; }
+    if (covered(x, y)) {                                  // his screen is open on top of him: a small burst where the player tapped (the card stamps itself)
+      el = document.activeElement;
+      if (now() - ptr.at < 800) { x = tx = ptr.x; y = ty = ptr.y; }
+      else if (el && el !== document.body && el.getBoundingClientRect) { r = el.getBoundingClientRect(); c = cvRect(); x = tx = r.left + r.width / 2 - c.left; y = ty = r.top + r.height / 2 - c.top; }
+      emit(R.twinkle, 10, tx, ty); emit(R.pop, 1, tx, ty);
+      return;
+    }
+    q = aim(null, 'hud-cash'); D.x = x; D.y = y;
+    fly(q.x, q.y, D, 8, S.coin, true);                    // you paid him
+    emit(R.twinkle, 10, tx, ty); emit(R.spark, 8, tx, ty, null, 1.2); emit(R.pop, 1, tx, ty);
+    spr = textSprite('DEAL!', size, '#ffd83d', true);
+    stamp('DEAL!', clamp(x, spr.w / 2 + 8, Math.max(spr.w / 2 + 8, V.w - spr.w / 2 - 8)), Math.max(spr.h * 0.6 + 8, y - 60 * U),
+      { color: '#ffd83d', size: size, framed: true, slam: 1, rot: -0.1, max: 1.15, delay: lowMo ? 0 : 0.55, hit: lowMo ? 0 : 3 });
+  });
+  on('boost:on', function (p, V) {
+    var q = stand(0, 80), x = q.x, y = q.y, hex = boostHex(p.id), g = boostGlow(hex), d = 0, o;
+    if (covered(x, y) && document.querySelector('#modal-root > .modal-layer')) return;   // bought in Dex's screen: the stand is behind it
+    if (now() - lastBoost < 700) d = Math.min(0.6, ++boostN * 0.2); else boostN = 0;    // several at once take turns
+    lastBoost = now();
+    ring(x, y, 10, 120 * V.scale, 0.65, hex, 7, d); ring(x, y, 10, 84 * V.scale, 0.5, '#ffffff', 3, d + 0.1);
+    if (!lowMo) ring(x, y, 10, 160 * V.scale, 0.85, hex, 3, d + 0.22);
+    if ((o = emit(R.boom, 1, x, y, null, 1, g))) o.delay = d;
+    emit(R.mote, 12, x, y + 30 * U, null, 1, g);
   });
 
   // UI juice: a spark where the player presses any big action button

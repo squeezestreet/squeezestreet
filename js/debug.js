@@ -16,6 +16,9 @@
  *   t:12.5           freeze the visual clock      wind:0.8
  *   pause  speed:3  reduced
  *   emit:name        SS.emit(name, {})     fx:confetti | fx:sale | fx:coins
+ *   regs:5           give the player 5 regulars with assorted streaks (works with or without 'scene')
+ *   dealer           stock Dex the Dealer for today with 3 boosts and a limited flavor
+ *   boost:golden     make a boost active
  */
 (function () {
   'use strict';
@@ -25,6 +28,26 @@
     cloudy: { wet: 0, heat: 0, cloud: 0.75, storm: 0 }, rainy: { wet: 0.7, heat: 0, cloud: 0.9, storm: 0 },
     storm: { wet: 1, heat: 0, cloud: 1, storm: 1 }
   };
+
+  var REG_KINDS = ['jogger', 'elder', 'kid', 'office', 'teen', 'parent', 'tourist', 'skater'];
+  function fakeRegulars(n) {
+    var st = SS.state, out = [], i, k;
+    for (i = 0; i < n; i++) {
+      k = REG_KINDS[i % REG_KINDS.length];
+      out.push({ id: 'r' + (i + 1), name: SS.DATA.regularNames[k][i % 8], kind: k, seed: 4242 + i * 977,
+        streak: [7, 3, 1, 12, 0, 5, 2, 9][i % 8], best: 12, visits: 4 + i, strikes: 0, since: 1, lastDay: Math.max(1, (st.day || 2) - 1) });
+    }
+    st.regulars = out;
+    return out;
+  }
+  function fakeDealer() {
+    var st = SS.state;
+    st.dealer = { day: st.day, offers: [
+      { id: 'flyers', kind: 'boost', sold: false }, { id: 'golden', kind: 'boost', sold: true },
+      { id: 'shield', kind: 'boost', sold: false }, { id: 'cotton', kind: 'limited', sold: false }] };
+    st.boosts = st.boosts || [];
+    if (st.boosts.indexOf('golden') < 0) st.boosts.push('golden');
+  }
 
   function fakeScene() {
     var st = SS.state || (SS.state = {});
@@ -39,21 +62,24 @@
       market: { lemons: 2.6, sugar: 1.8, ice: 1.2, cups: 1.5 },
       forecast: { type: 'sunny', temp: 27, confidence: 0.8 }, weather: { type: 'sunny', temp: 27 }, event: null,
       milestonesDone: ['first'], stats: { days: 2, bestProfit: 14, bestCups: 22, tips: 2, served: 40 }, history: [],
-      lastResult: null, settings: { sfx: false, music: false, speed: 1, reducedMotion: false }, tutorial: { done: true }, won: false
+      lastResult: null, settings: { sfx: false, music: false, speed: 1, reducedMotion: false }, tutorial: { done: true }, won: false,
+      regulars: [], boosts: [], dealer: null
     });
+    fakeRegulars(4);
+    fakeDealer();
     var id = 0;
     function c(kind, x, lane, dir, state, extra) {
       return Object.assign({ id: ++id, kind: kind, seed: id * 7919, x: x, lane: lane, dir: dir, speed: state === 'queue' || state === 'order' ? 0 : 55,
-        state: state, stateT: 1.3, hasDrink: false, mood: 0.2, patience: 0.8, bubble: null, qty: 1 }, extra || {});
+        state: state, stateT: 1.3, hasDrink: false, mood: 0.2, patience: 0.8, bubble: null, qty: 1, regularId: null, streak: 0, mult: 1 }, extra || {});
     }
     var q = [
       c('parent', W.SERVE_X, W.QUEUE_LANE, 1, 'order'),
-      c('kid', W.SERVE_X - W.QUEUE_GAP, W.QUEUE_LANE, 1, 'queue', { bubble: { type: 'thirsty', ttl: 2, max: 2.5 } }),
+      c('jogger', W.SERVE_X - W.QUEUE_GAP, W.QUEUE_LANE, 1, 'queue', { seed: 4242, regularId: 'r1', streak: 7, mult: SS.loyaltyMult(7) }),
       c('jogger', W.SERVE_X - 2 * W.QUEUE_GAP, W.QUEUE_LANE, 1, 'queue', { patience: 0.25, bubble: { type: 'wait', ttl: 2, max: 2.5 } }),
       c('elder', W.SERVE_X - 3 * W.QUEUE_GAP, W.QUEUE_LANE, 1, 'queue')
     ];
     var others = [
-      c('teen', 640, 0.82, 1, 'leave', { hasDrink: true, mood: 0.9, bubble: { type: 'love', ttl: 2, max: 2.5 } }),
+      c('teen', 640, 0.82, 1, 'leave', { hasDrink: true, mood: 0.9, bubble: { type: 'love', ttl: 2, max: 2.5 }, seed: 4242 + 4 * 977, regularId: 'r5', streak: 1, mult: SS.loyaltyMult(1) }),
       c('tourist', 760, 0.92, -1, 'walk', { bubble: { type: 'pricey', ttl: 2, max: 2.5 } }),
       c('office', 120, 0.1, 1, 'walk'),
       c('skater', 860, 0.12, -1, 'walk', { speed: 120 }),
@@ -68,7 +94,7 @@
       sold: 14, revenue: 17.5, tipsEarned: 1.2,
       tips: [{ id: 1, x: 300, lane: 0.82, amount: 0.5, ttl: 5 }, { id: 2, x: 610, lane: 0.7, amount: 0.25, ttl: 3 }],
       bell: { cd: 6, max: 20, active: 0 }, soldOut: null, weatherNow: { type: 'sunny', temp: 27 },
-      missed: { pricey: 2, wait: 1, soldout: 0, quit: 0 }, hourly: [1, 2, 3, 4, 2, 1, 1, 0, 0]
+      missed: { pricey: 2, wait: 1, soldout: 0, quit: 0 }, hourly: [1, 2, 3, 4, 2, 1, 1, 0, 0], loyalty: 2.4
     };
     SS.debugNoSim = true;
   }
@@ -79,6 +105,9 @@
       case 'scene': fakeScene(); break;
       case 'new': Sim.newGame(); break;
       case 'cash': st.cash = Number(a); break;
+      case 'regs': fakeRegulars(Number(a) || 5); break;
+      case 'dealer': fakeDealer(); break;
+      case 'boost': st.boosts = st.boosts || []; if (st.boosts.indexOf(a) < 0) st.boosts.push(a); break;
       case 'rep': st.reputation = Number(a); break;
       case 'day': st.day = Number(a); break;
       case 'loc':

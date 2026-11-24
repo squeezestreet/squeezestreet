@@ -4,7 +4,8 @@
  * Prep is built once per morning and then patched in place, so steppers keep focus and
  * hold-to-repeat keeps working while the numbers around them change.
  *
- * SS.Screens = { init(), open(name) }      name: 'shop' | 'map' | 'goals'
+ * SS.Screens = { init(), open(name) }      name: 'shop' | 'map' | 'goals' | 'dealer' (Dex the Dealer)
+ * The goals modal also has a Regulars tab; the results card links to it.
  */
 (function () {
   'use strict';
@@ -35,6 +36,13 @@
   function safe(what, fn) { try { return fn(); } catch (e) { if (window.console) console.error('[SS.Screens] ' + what + ' failed', e); } }
   function listJoin(a) { return a.length < 2 ? a.join('') : a.slice(0, -1).join(', ') + ' and ' + a[a.length - 1]; }
   function tinted(icon, color, c) { return h('span', { class: c, style: 'color:' + color, html: SS.icon(icon) }); }
+  /** today's Dex the Dealer info, or null when the sim cannot say */
+  function dex() { var S = sim(); var d = S && S.dealerInfo ? safe('dealerInfo', S.dealerInfo) : null; return d && Array.isArray(d.offers) ? d : null; }
+  function boostDef(id) { return (D.boosts && D.byId(D.boosts, id)) || null; }
+  function kindName(k) { return D.kinds[k] ? D.kinds[k].name : 'Customer'; }
+  function hasLimited(d) { return !!d && d.present && d.offers.some(function (o) { return o.kind === 'limited' && !o.sold; }); }
+  /** a boost's icon on a disc of its own colour */
+  function boostDot(b, c) { return h('span', { class: 'boost-dot' + (c ? ' ' + c : ''), style: 'background:' + mixHex(b.color, '#ffffff', 0.45), html: SS.icon(b.icon) }); }
 
   var WX_NOTE = {
     sunny: 'Good lemonade weather. Expect a steady crowd all day.',
@@ -229,12 +237,14 @@
     prep.cupsWord = h('strong', null, 'cups you can make');
     prep.limit = h('span', { class: 'prep-sum-limit' });
     prep.sumCost = h('dd', { class: 'num' }); prep.sumRentL = h('dt'); prep.sumRent = h('dd', { class: 'num' }); prep.sumLeft = h('dd', { class: 'num' });
+    prep.boosts = h('div', { class: 'prep-boosts', role: 'list', 'aria-label': 'Boosts working for you today', hidden: true });
     var sum = h('section', { class: 'well prep-sum prep-in', style: '--i:6' },
       h('div', { class: 'prep-sum-cups' }, h('span', { class: 'prep-sum-ico', html: SS.icon('pitcher') }), prep.cups, h('div', { class: 'prep-sum-text' }, prep.cupsWord, prep.limit)),
       h('dl', { class: 'prep-sum-rows' },
         h('div', null, h('dt', null, 'Shopping'), prep.sumCost),
         h('div', null, prep.sumRentL, prep.sumRent),
-        h('div', { class: 'prep-sum-total' }, h('dt', null, 'Cash left after'), prep.sumLeft)));
+        h('div', { class: 'prep-sum-total' }, h('dt', null, 'Cash left after'), prep.sumLeft)),
+      prep.boosts);
 
     body.append(h('div', { class: 'prep' }, head,
       h('div', { class: 'prep-cols' }, h('div', { class: 'prep-col' }, forecast, news, market), h('div', { class: 'prep-col' }, recipe, price, sum))));
@@ -247,7 +257,14 @@
       var r = S && S.startDay ? S.startDay() : null;
       if (r && r.ok === false) { SS.sfx('error'); patchPrep(); restart(prep && prep.reason, 'prep-shake'); }
     } }, 'Open for business');
-    foot.append(h('div', { class: 'prep-foot' }, h('div', { class: 'prep-foot-in' }, prep.reason, h('div', { class: 'prep-foot-row' }, navBtn('shop', 'Shop', 'shop'), navBtn('map', 'Map', 'map'), prep.go))));
+    prep.deals = navBtn('dealer', 'Deals', 'dealer');
+    prep.deals.classList.add('prep-deals');
+    prep.deals.setAttribute('data-tut', 'deals');
+    prep.deals.hidden = true;
+    prep.deals.append(h('i', { class: 'prep-deals-badge', 'aria-hidden': 'true' }));
+    prep.foot = h('div', { class: 'prep-foot' }, h('div', { class: 'prep-foot-in' }, prep.reason,
+      h('div', { class: 'prep-foot-row' }, navBtn('shop', 'Shop', 'shop'), navBtn('map', 'Map', 'map'), prep.deals, prep.go)));
+    foot.append(prep.foot);
 
     patchPrep();
     showSheet('dock');
@@ -325,6 +342,25 @@
     if (prep.reasonKey !== ico) { prep.reasonKey = ico; prep.reasonIco.innerHTML = SS.icon(ico); }
     txt(prep.reasonText, ok ? int(info.maxCups) + ' ' + plural(info.maxCups, 'cup') + ' ready to sell at ' + money(st.price) + ' each.' : info.reason || 'Not ready yet.');
     cls(prep.reason, 'is-ok', ok);
+    patchPrepDex(st);
+  }
+
+  /** the Deals button (with a badge while a limited edition is unsold) and today's boost chips */
+  function patchPrepDex(st) {
+    var d = dex(), here = !!(d && d.present), lim = hasLimited(d);
+    prep.deals.hidden = !here;
+    cls(prep.deals, 'has-limited', lim);
+    prep.deals.setAttribute('aria-label', lim ? 'Dex\'s deals. A limited edition is in today' : 'Dex\'s deals');
+    cls(prep.foot, 'has-deals', here);
+    var act = ((d && d.active) || st.boosts || []).filter(boostDef), key = act.join(',');
+    if (prep.boostKey === key) return;
+    prep.boostKey = key;
+    prep.boosts.textContent = '';
+    prep.boosts.hidden = !act.length;
+    act.forEach(function (id) {
+      var b = boostDef(id);
+      prep.boosts.append(h('span', { class: 'chip prep-boost', role: 'listitem', title: b.desc }, boostDot(b), h('span', null, b.name + ' · today')));
+    });
   }
 
   /* ------------------------------------------------------------------ *
@@ -342,8 +378,43 @@
       satisfaction: SS.clamp(num(r.satisfaction), 0, 1), repBefore: SS.clamp(num(r.repBefore), 0, 5), repAfter: SS.clamp(num(r.repAfter), 0, 5),
       reviews: Array.isArray(r.reviews) ? r.reviews.filter(Boolean).slice(0, 6) : [], advice: r.advice || '',
       hourly: hourly, spoiled: { lemons: num(sp.lemons), ice: num(sp.ice) }, milestones: Array.isArray(r.milestones) ? r.milestones : [],
-      bestDay: !!r.bestDay
+      bestDay: !!r.bestDay,
+      loyalty: Math.max(0, num(r.loyalty)), boostCost: Math.max(0, num(r.boostCost)),
+      boosts: (Array.isArray(r.boosts) ? r.boosts : []).filter(boostDef),
+      regulars: (Array.isArray(r.regulars) ? r.regulars : []).filter(function (g) { return g && REG_OUT[g.outcome]; }).map(function (g) {
+        return { id: g.id, name: String(g.name || 'A regular'), kind: g.kind, outcome: g.outcome, streak: Math.max(0, Math.floor(num(g.streak))),
+          mult: num(g.mult) || SS.loyaltyMult(g.streak), bonus: Math.max(0, num(g.bonus)), reason: g.reason || '' };
+      }).sort(function (a, b) { return REG_OUT[a.outcome] - REG_OUT[b.outcome] || b.streak - a.streak; })
     };
+  }
+  /* regulars on the results card: display order, and why a streak broke, in words */
+  var REG_OUT = { streak: 1, 'new': 2, saved: 3, broken: 4, lost: 5, closed: 6, away: 7 };
+  var REG_WHY = {
+    taste: 'they did not like the taste', pricey: 'it cost too much for them', slow: 'they waited too long for their cup',
+    wait: 'the line was too long', soldout: 'you had sold out', quit: 'they gave up waiting in line'
+  };
+  var REG_FACE = { streak: 'faceHappy', 'new': 'faceLove', saved: 'shield', broken: 'faceSad', lost: 'faceSad', closed: 'clock', away: 'regular' };
+  function regLine(g) {
+    switch (g.outcome) {
+      case 'new': return 'New regular! Back tomorrow for a loyalty bonus';
+      case 'streak': return g.bonus > 0.004 ? 'Streak ' + int(g.streak) + ' · paid ' + SS.fmtMult(SS.loyaltyMult(g.streak - 1)) + ' (+' + money(g.bonus) + ')'
+        : 'Streak ' + int(g.streak) + ' · pays ' + SS.fmtMult(g.mult) + ' next visit';
+      case 'broken': return 'Streak lost: ' + (REG_WHY[g.reason] || 'they left unhappy') + '. One more bad visit and they stop coming';
+      case 'saved': return 'Your Streak Shield saved this streak';
+      case 'lost': return 'Stopped coming after two bad visits';
+      case 'closed': return 'Came by just as you closed. Streak kept';
+      default: return 'Didn\'t come today. Streak kept';
+    }
+  }
+  /** flame + streak number, cold when the streak is gone */
+  function streakBadge(n, c) {
+    return h('span', { class: 'reg-streak' + (n > 0 ? '' : ' is-cold') + (c ? ' ' + c : ''), title: 'Streak: ' + int(n) + ' happy ' + plural(n, 'visit') + ' in a row' },
+      I('flame'), h('b', { class: 'num' }, int(n)), h('span', { class: 'hud-sr' }, ' visit streak'));
+  }
+  /** next = label it as the next visit's multiplier (results rows also mention what was paid today) */
+  function multChip(m, next) {
+    return h('span', { class: 'chip reg-mult num' + (m > 1.001 ? '' : ' is-flat'), title: (next ? 'Next visit: ' : 'Loyalty bonus: ') + 'pays ' + SS.fmtMult(m) + ' the price' },
+      next ? h('span', { class: 'reg-mult-next' }, 'next ') : null, SS.fmtMult(m));
   }
   function moodFace(m) { return m > 0.6 ? 'faceLove' : m > 0.15 ? 'faceHappy' : m > -0.25 ? 'faceMeh' : m > -0.65 ? 'faceSad' : 'faceAngry'; }
   function signed(n) { return (n > 0.004 ? '+' : '') + money(n); }
@@ -422,9 +493,14 @@
       ['cup', 'Cups sold', int(r.cups), ''],
       ['coin', 'Sales', signed(r.revenue), r.revenue > 0 ? 'good' : ''],
       ['tipjar', 'Tips', signed(r.tips), r.tips > 0 ? 'good' : ''],
+      r.loyalty > 0.004 ? ['regular', 'Loyalty bonus', signed(r.loyalty), 'good'] : null,
       ['lemon', 'Ingredients', r.ingredientCost > 0 ? '-' + money(r.ingredientCost) : money(0), r.ingredientCost > 0 ? 'bad' : ''],
-      ['locStreet', 'Rent', r.rent > 0 ? '-' + money(r.rent) : 'Free', r.rent > 0 ? 'bad' : '']
-    ].map(function (d) { return h('div', { class: 'res-row' }, h('dt', null, I(d[0]), d[1]), h('dd', { class: 'num ' + d[3] }, d[2])); });
+      ['locStreet', 'Rent', r.rent > 0 ? '-' + money(r.rent) : 'Free', r.rent > 0 ? 'bad' : ''],
+      r.boostCost > 0.004 ? ['dealer', 'Dex\'s deals', '-' + money(r.boostCost), 'bad', r.boosts] : null
+    ].filter(Boolean).map(function (d) {
+      var dots = d[4] && d[4].length ? h('span', { class: 'res-row-dots', 'aria-hidden': 'true' }, d[4].map(function (id) { return boostDot(boostDef(id)); })) : null;
+      return h('div', { class: 'res-row' }, h('dt', null, I(d[0]), d[1], dots), h('dd', { class: 'num ' + d[3] }, d[2]));
+    });
     var totalRow = h('div', { class: 'res-row res-row--total' }, h('dt', null, tone === 'bad' ? 'Loss' : 'Profit'), h('dd', { class: 'num ' + tone }, money(profit)));
     res.cash = h('b', { class: 'num' }, money(st.cash));
     var cashLine = h('p', { class: 'res-cash' }, I('cash'), 'Cash on hand ', res.cash);
@@ -496,6 +572,31 @@
       delta.classList.add('is-in');
     });
 
+    /* regulars */
+    var regsNow = Array.isArray(st.regulars) ? st.regulars.length : 0, regEls = [];
+    var regsHead = h('div', { class: 'res-regs-head' }, h('h3', { class: 'display res-sec-title' }, I('regular'), 'Regulars'),
+      regsNow > 0 ? h('button', { class: 'btn btn--sm res-regs-all', type: 'button', onclick: function () { SS.sfx('click'); openRegulars(); } },
+        'See all ' + int(regsNow)) : null);
+    var regsGrid = h('div', { class: 'res-regs-grid' });
+    r.regulars.forEach(function (g, i) {
+      var el = h('article', { class: 'res-reg res-reg--' + g.outcome, style: '--i:' + i },
+        h('span', { class: 'res-reg-face' }, I(REG_FACE[g.outcome] || 'regular')),
+        h('div', { class: 'res-reg-main' },
+          h('div', { class: 'res-reg-top' },
+            h('strong', { class: 'res-reg-name' }, g.name), h('span', { class: 'label res-reg-kind' }, kindName(g.kind)),
+            g.outcome === 'new' ? h('span', { class: 'chip res-reg-new' }, 'New') : null),
+          h('p', { class: 'res-reg-line' }, regLine(g))),
+        g.outcome === 'lost' ? null : h('div', { class: 'res-reg-side' }, streakBadge(g.streak), multChip(g.mult, true)));
+      regEls.push(el); regsGrid.append(el);
+    });
+    var regsEmpty = r.regulars.length ? null : h('p', { class: 'well res-regs-empty' }, I(regsNow ? 'calendar' : 'regular'),
+      h('span', null, regsNow ? 'Your regulars took the day off. Their streaks are safe.' : 'Make someone really happy and they might come back tomorrow.'));
+    var regs = h('section', { class: 'res-sec res-regs' }, regsHead, r.regulars.length ? regsGrid : regsEmpty);
+    step(regsHead, 160);
+    if (regEls.length) regEls.forEach(function (el, i) {
+      step(el, i < 6 ? 120 : 50, function (instant) { if (!instant && i < 6) SS.sfx('tick'); });
+    }); else step(regsEmpty, 200);
+
     /* reviews */
     var cards = h('div', { class: 'res-reviews-grid' }), reviewEls = [];
     r.reviews.forEach(function (rv) {
@@ -526,7 +627,7 @@
     step(after, 300, function (instant) { if (!instant && badges.length) SS.sfx('tally'); });
 
     res.root = h('div', { class: 'res', onclick: function (e) { if (!e.target.closest('button, a')) finishReveal(); } },
-      head, h('div', { class: 'res-grid' }, heroBox, hours, crowd, rep, reviews, after),
+      head, h('div', { class: 'res-grid' }, heroBox, hours, crowd, rep, regs, reviews, after),
       h('span', { class: 'res-skip', 'aria-hidden': 'true' }, 'Tap to skip'));
     body.append(res.root);
     ['wheel', 'touchmove'].forEach(function (n) { res.root.addEventListener(n, function () { if (res) res.follow = false; }, { passive: true }); });
@@ -658,12 +759,15 @@
     var facts = h('ul', { class: 'shop-facts' },
       h('li', null, I(f.wtp > 0 ? 'arrowUp' : 'tag'), f.wtp > 0 ? 'People pay about ' + Math.round(f.wtp * 100) + '% more' : 'The regular price'),
       h('li', null, I('coin'), f.extraCost > 0 ? money(f.extraCost / 10) + ' more a cup to make' : 'No extra cost to make'));
-    var card = h('article', { class: 'panel shop-card shop-card--flavor' },
+    var only = f.limited ? h('p', { class: 'shop-only' }, I('dealer'), h('span', null, 'Limited edition · only from Dex the Dealer')) : null;
+    var card = h('article', { class: 'panel shop-card shop-card--flavor' + (f.limited ? ' shop-card--limited' : '') },
       tinted('drink', f.color, 'shop-art shop-art--drink'),
-      h('div', { class: 'shop-main' }, h('div', { class: 'shop-top' }, h('h4', { class: 'display shop-name' }, f.name), f.repReq > 0 ? req : null), h('p', { class: 'shop-desc' }, f.blurb), facts),
-      h('div', { class: 'shop-act' }, btn, inUse, why), stampEl());
+      h('div', { class: 'shop-main' }, h('div', { class: 'shop-top' }, h('h4', { class: 'display shop-name' }, f.name),
+        f.limited ? h('span', { class: 'chip shop-lim-chip' }, I('sparkle'), 'Limited') : f.repReq > 0 ? req : null), h('p', { class: 'shop-desc' }, f.blurb), facts),
+      h('div', { class: 'shop-act' }, btn, inUse, only, why), stampEl());
     function act() {
       var info = S && S.flavorInfo ? S.flavorInfo(f.id) : null, r = null;
+      if (f.limited && info && !info.owned) { refuse(card, why, info.reason); return; }
       if (info && info.owned) { r = S.setFlavor(f.id); if (r && r.ok) stamp(card, 'Pouring!'); }
       else if (info) { r = S.buyFlavor(f.id); if (r && r.ok) stamp(card, 'Unlocked!'); }
       if (r && r.ok) why.hidden = true; else refuse(card, why, r && r.reason);
@@ -671,8 +775,10 @@
     }
     function refresh() {
       var st = SS.state, info = (S && S.flavorInfo && S.flavorInfo(f.id)) || { owned: false, current: false, canBuy: false, reason: '' };
-      var mode = info.current ? 'on' : info.owned ? 'own' : 'buy';
-      btn.hidden = info.current; inUse.hidden = !info.current;
+      var mode = info.current ? 'on' : info.owned ? 'own' : 'buy', locked = !!f.limited && !info.owned;
+      btn.hidden = info.current || locked; inUse.hidden = !info.current;
+      if (only) only.hidden = !locked;
+      cls(card, 'is-locked', locked);
       req.hidden = info.owned;
       req.set(!!st && st.reputation + 1e-9 >= f.repReq, 'Needs ' + stars1(f.repReq) + ' stars');
       if (card._mode !== mode) {
@@ -759,8 +865,9 @@
         var info = S && S.locationInfo ? S.locationInfo(loc.id) : null, r = null;
         if (info && info.unlocked) { r = S.setLocation(loc.id); if (r && r.ok) stamp(card, 'Moved in!'); }
         else if (info) { r = S.unlockLocation(loc.id); if (r && r.ok) stamp(card, 'Unlocked!'); }
-        if (r && r.ok) why.hidden = true; else refuse(card, why, r && r.reason);
+        if (r && r.ok) why.hidden = true;
         refreshAll();
+        if (!(r && r.ok)) refuse(card, why, r && r.reason);
       }
       stops.push(function (st) {
         var info = (S && S.locationInfo && S.locationInfo(loc.id)) || { unlocked: false, current: false, canUnlock: false, reason: '' };
@@ -848,12 +955,181 @@
       allMeter.style.setProperty('--v', (n / Math.max(1, D.milestones.length)).toFixed(3));
       cls(allMeter, 'is-zero', n < 1);
     }
-    var el = h('div', { class: 'goal' },
+    var pane = h('div', { class: 'goal-pane', role: 'tabpanel', 'aria-label': 'Goals' },
       h('div', { class: 'goal-stats' }, tile('days', 'calendar', 'Days played'), tile('best', 'cash', 'Best day profit'), tile('cups', 'cup', 'Most cups in a day'), tile('life', 'chart', 'Lifetime sales')),
       h('div', { class: 'goal-all' }, h('span', { class: 'goal-all-text' }, I('trophy'), doneN, ' goals reached'), allMeter),
       list);
+    var regs = buildRegsPane(), tabs = {}, counts = {};
+    function setTab(t) {
+      goalsTab = t;
+      ['goals', 'regulars'].forEach(function (k) { var on = k === t; cls(tabs[k], 'is-on', on); tabs[k].setAttribute('aria-selected', on ? 'true' : 'false'); });
+      pane.hidden = t !== 'goals'; regs.el.hidden = t !== 'regulars';
+    }
+    function tab(k, label, icon) {
+      counts[k] = h('span', { class: 'num shop-tab-n' });
+      return (tabs[k] = h('button', { class: 'shop-tab', type: 'button', role: 'tab', onclick: function () { if (goalsTab !== k) { SS.sfx('click'); setTab(k); } } }, icon, h('span', null, label), counts[k]));
+    }
+    var el = h('div', { class: 'goal' }, h('div', { class: 'shop-tabs goal-tabs', role: 'tablist' }, tab('goals', 'Goals', I('trophy')), tab('regulars', 'Regulars', I('regular'))), pane, regs.el);
+    function refreshAll() {
+      var st = SS.state;
+      if (!st) return;
+      refresh(); regs.refresh();
+      txt(counts.goals, (st.milestonesDone || []).length + '/' + D.milestones.length);
+      txt(counts.regulars, int(Array.isArray(st.regulars) ? st.regulars.length : 0));
+    }
+    setTab(goalsTab);
+    refreshAll();
+    return { el: el, refresh: refreshAll };
+  }
+
+  /* ------------------------------------------------------------------ *
+   * REGULARS (a tab in the goals modal)
+   * ------------------------------------------------------------------ */
+  var goalsTab = 'goals';
+  function openRegulars() { goalsTab = 'regulars'; open('goals'); }
+  function buildRegsPane() {
+    var S = sim(), list = h('ol', { class: 'regs-list' }), key = null, L = SS.LOYALTY || { step: 0.1, max: 2 };
+    var nN = h('b', { class: 'display num regs-tile-n' }), bestN = h('b', { class: 'display num regs-tile-n' }), topN = h('b', { class: 'display num regs-tile-n' });
+    function tile(icon, n, label) { return h('div', { class: 'goal-stat' }, I(icon, 'goal-stat-ico'), h('div', { class: 'goal-stat-text' }, n, h('span', { class: 'label' }, label))); }
+    var tiles = h('div', { class: 'regs-tiles' }, tile('regular', nN, 'Regulars'), tile('flame', bestN, 'Longest streak ever'), tile('coin', topN, 'Top loyalty bonus'));
+    var empty = h('div', { class: 'well regs-empty' }, I('regular', 'regs-empty-ico'),
+      h('strong', { class: 'display regs-empty-title' }, 'No regulars yet'),
+      h('p', null, 'Make someone really happy and they might come back tomorrow.'));
+    var note = h('p', { class: 'regs-note' }, I('info'), h('span', null, 'Every happy visit in a row adds ' + Math.round(L.step * 100) + '% to what a regular pays, up to ' +
+      SS.fmtMult(L.max) + '. One bad visit resets the streak. Two in a row and they stop coming.'));
+    function stat(label, v) { return h('div', null, h('dt', { class: 'label' }, label), h('dd', { class: 'num' }, int(v))); }
+    function refresh() {
+      var st = SS.state, rs = (S && S.regularsInfo && safe('regularsInfo', S.regularsInfo)) || [];
+      var k = rs.map(function (g) { return g.id + ':' + g.streak + ':' + g.visits + ':' + g.best; }).join('|');
+      if (k === key) return;
+      key = k;
+      list.textContent = '';
+      var top = 1;
+      rs.forEach(function (g, i) {
+        var m = num(g.mult) || SS.loyaltyMult(g.streak);
+        top = Math.max(top, m);
+        list.append(h('li', { class: 'regs-item' + (g.streak > 0 ? '' : ' is-cold'), style: '--i:' + i },
+          h('span', { class: 'regs-face' }, I(g.streak >= 5 ? 'faceLove' : g.streak > 0 ? 'faceHappy' : 'faceMeh')),
+          h('div', { class: 'regs-main' }, h('strong', { class: 'regs-name' }, String(g.name || 'A regular')),
+            h('span', { class: 'regs-meta' }, kindName(g.kind) + (num(g.since) ? ' · since day ' + int(g.since) : ''))),
+          h('dl', { class: 'regs-stats' }, stat('Best', num(g.best)), stat('Visits', num(g.visits))),
+          h('div', { class: 'regs-side' }, streakBadge(num(g.streak)), multChip(m))));
+      });
+      txt(nN, int(rs.length));
+      txt(bestN, int(Math.max(num(st && st.stats && st.stats.bestStreak), rs.reduce(function (a, g) { return Math.max(a, num(g.best)); }, 0))));
+      txt(topN, SS.fmtMult(top));
+      empty.hidden = rs.length > 0; list.hidden = tiles.hidden = !rs.length;
+    }
     refresh();
-    return { el: el, refresh: refresh };
+    return { el: h('div', { class: 'regs', role: 'tabpanel', 'aria-label': 'Regulars' }, tiles, list, empty, note), refresh: refresh };
+  }
+
+  /* ------------------------------------------------------------------ *
+   * DEX THE DEALER
+   * ------------------------------------------------------------------ */
+  function dealCard(o, onBuy) {
+    var S = sim(), lim = o.kind === 'limited', fl = lim ? D.byId(D.flavors, o.id) : null;
+    var why = h('p', { class: 'shop-why dex-why', role: 'alert', hidden: true }), cost = h('span', { class: 'num' });
+    var btn = h('button', { class: 'btn ' + (lim ? 'btn--go' : 'btn--primary') + ' shop-buy dex-buy', type: 'button', onclick: buy }, I('coin'), cost);
+    var doneT = h('span'), done = h('span', { class: 'chip chip--good shop-maxed dex-done', hidden: true }, I('check'), doneT);
+    var card;
+    if (lim) {
+      var pct = fl ? Math.round(num(fl.wtp) * 100) : 0, extra = fl ? num(fl.extraCost) / 10 : 0, i, sparks = [];
+      for (i = 0; i < 4; i++) sparks.push(h('span', { class: 'dex-lim-spark', style: '--i:' + i, html: SS.icon('sparkle') }));
+      card = h('article', { class: 'panel dex-card dex-card--limited', style: '--fc:' + o.color + ';--fc-pale:' + mixHex(o.color, '#ffffff', 0.72) + ';--fc-mid:' + mixHex(o.color, '#ffffff', 0.35) },
+        h('span', { class: 'dex-ribbon', 'aria-hidden': 'true' }, h('span', null, 'Limited edition')),
+        h('div', { class: 'dex-lim-art', 'aria-hidden': 'true' }, h('i', { class: 'dex-lim-rays' }), h('span', { class: 'dex-lim-glass', style: 'color:' + o.color, html: SS.icon('drink') }), sparks),
+        h('div', { class: 'dex-lim-main' },
+          h('span', { class: 'label dex-lim-kicker' }, 'Limited edition flavor'),
+          h('h4', { class: 'display dex-lim-name' }, o.name),
+          h('div', { class: 'dex-lim-chips' },
+            h('span', { class: 'chip dex-chip-today' }, I('clock'), 'Today only'),
+            pct > 0 ? h('span', { class: 'chip chip--good num' }, I('arrowUp'), '+' + pct + '% price') : null),
+          h('p', { class: 'shop-desc dex-lim-blurb' }, (fl ? fl.blurb + ' ' : '') + 'Once it is yours, you keep it for good.' +
+            (extra > 0 ? ' Costs ' + money(extra) + ' more a cup to make.' : ''))),
+        h('div', { class: 'shop-act dex-lim-act' }, btn, done, why), stampEl());
+    } else {
+      card = h('article', { class: 'panel dex-card', style: '--bc:' + o.color + ';--bc-pale:' + mixHex(o.color, '#ffffff', 0.78) + ';--bc-mid:' + mixHex(o.color, '#ffffff', 0.45) },
+        h('div', { class: 'dex-art', html: SS.icon(o.icon || 'sparkle') }),
+        h('div', { class: 'shop-main' }, h('h4', { class: 'display shop-name' }, o.name), h('p', { class: 'shop-desc' }, o.desc)),
+        h('div', { class: 'shop-act' }, btn, done, why), stampEl());
+    }
+    function buy() {
+      var r = S && S.buyDeal ? safe('buyDeal', function () { return S.buyDeal(o.id); }) : null;
+      if (r && r.ok) { why.hidden = true; stamp(card, lim ? 'Yours!' : 'Bought!'); }
+      else { refuse(card, why, (r && r.reason) || card._reason); restart(why, 'is-alert'); }
+      onBuy();
+    }
+    function refresh(info) {
+      var st = SS.state, on = !lim && (info.sold || (st && st.boosts && st.boosts.indexOf(info.id) >= 0));
+      var finished = info.sold || on;
+      btn.hidden = finished; done.hidden = !finished;
+      txt(doneT, lim ? 'Yours to keep' : on ? 'Active today' : 'Sold');
+      txt(cost, 'Buy for ' + moneyShort(info.cost));
+      btn.setAttribute('aria-label', 'Buy ' + info.name + ' for ' + money(info.cost));
+      btn.setAttribute('aria-disabled', info.canBuy ? 'false' : 'true');
+      card._reason = info.reason;
+      if (finished || info.canBuy) { why.hidden = true; why.classList.remove('is-alert'); }
+      else { txt(why, info.reason || 'Dex cannot sell you this right now.'); why.hidden = false; }
+      cls(card, 'is-on', finished);
+    }
+    return { el: card, refresh: refresh };
+  }
+
+  function buildDealer() {
+    var strip = cashStrip(), cards = {}, order = null;
+    var line = h('p', { class: 'dex-line' });
+    var hero = h('div', { class: 'dex-hero' },
+      h('div', { class: 'dex-avatar', 'aria-hidden': 'true' }, h('i', { class: 'dex-rays' }), I('dealer', 'dex-face')),
+      h('div', { class: 'dex-bubble' }, h('span', { class: 'label' }, 'Dex says'), line));
+    var activeRow = h('div', { class: 'dex-active-row', role: 'list' });
+    var active = h('section', { class: 'dex-active', 'aria-label': 'Boosts active today' }, h('span', { class: 'label' }, 'Active today'), activeRow);
+    var grid = h('div', { class: 'dex-grid' });
+    var note = h('p', { class: 'dex-note' }, I('info'), h('span'));
+    var emptyT = h('strong', { class: 'display dex-empty-title' }), emptyP = h('p');
+    var empty = h('div', { class: 'well dex-empty' }, I('dealer', 'dex-empty-face'), emptyT, emptyP);
+    var activeKey = null;
+    function refresh() {
+      var st = SS.state, d = dex();
+      if (!st) return;
+      strip.refresh();
+      var here = !!(d && d.present);
+      hero.hidden = active.hidden = grid.hidden = note.hidden = !here;
+      empty.hidden = here;
+      if (!here) {
+        var res = st.phase === 'results', first = (st.day | 0) < 2 && !res;
+        txt(emptyT, res ? 'Dex has packed up for the night' : first ? 'Dex rolls into town tomorrow' : 'Dex is not around right now');
+        txt(emptyP, res ? 'He\'ll be back in the morning.' : first ? 'He sells boosts that last one day, and sometimes a limited-edition flavor you can\'t get anywhere else.'
+          : 'Check back in the morning.');
+        return;
+      }
+      txt(line, '“' + (d.line || 'Step right up! Fresh deals, today only.') + '”');
+      txt(note.lastChild, st.phase === 'day' ? 'A boost you buy now works for the rest of today.' : 'A boost you buy now works for the whole day ahead. Tomorrow Dex brings new stock.');
+      var offers = d.offers.slice().sort(function (a, b) { return (b.kind === 'limited') - (a.kind === 'limited'); });
+      var k = offers.map(function (o) { return o.id; }).join(',');
+      if (k !== order) {
+        order = k; cards = {}; grid.textContent = '';
+        offers.forEach(function (o, i) {
+          var c = dealCard(o, refresh);
+          c.el.style.setProperty('--i', i);
+          cards[o.id] = c; grid.append(c.el);
+        });
+      }
+      offers.forEach(function (o) { if (cards[o.id]) cards[o.id].refresh(o); });
+      var act = (d.active || []).filter(boostDef), ak = act.join(',');
+      if (ak !== activeKey) {
+        var grew = activeKey !== null && ak.length > activeKey.length;
+        activeKey = ak; activeRow.textContent = '';
+        act.forEach(function (id, i) {
+          var b = boostDef(id), chip = h('span', { class: 'chip dex-active-chip', role: 'listitem', title: b.desc }, boostDot(b), b.name);
+          if (grew && i === act.length - 1) chip.classList.add('is-new');
+          activeRow.append(chip);
+        });
+        if (!act.length) activeRow.append(h('span', { class: 'dex-active-none' }, 'No boosts yet. Pick one below and it starts working right away.'));
+      }
+    }
+    refresh();
+    return { el: h('div', { class: 'dex' }, h('div', { class: 'shop-bar' }, strip.el), hero, active, grid, note, empty), refresh: refresh };
   }
 
   /* ------------------------------------------------------------------ *
@@ -862,7 +1138,8 @@
   var MODALS = {
     shop: { title: 'Shop', icon: 'shop', build: buildShop },
     map: { title: 'Town map', icon: 'map', build: buildMap },
-    goals: { title: 'Goals', icon: 'trophy', build: buildGoals }
+    goals: { title: 'Goals', icon: 'trophy', build: buildGoals },
+    dealer: { title: 'Dex\'s Deals', icon: 'dealer', build: buildDealer }
   };
   /** used only when ui.js is not there: a plain panel in #modal-root */
   function fallbackModal(name, def, bodyEl, onClose) {
@@ -921,7 +1198,8 @@
       body = sheet.querySelector('.sheet-body') || sheet.appendChild(h('div', { class: 'sheet-body' }));
       foot = sheet.querySelector('.sheet-foot') || sheet.appendChild(h('div', { class: 'sheet-foot' }));
       SS.on('phase', onPhase);
-      ['cart', 'recipe', 'price', 'cash', 'upgrade:buy', 'flavor:buy', 'flavor:set', 'location:set', 'location:unlock', 'reputation', 'milestone']
+      ['cart', 'recipe', 'price', 'cash', 'upgrade:buy', 'flavor:buy', 'flavor:set', 'location:set', 'location:unlock', 'reputation', 'milestone',
+        'dealer:buy', 'boost:on', 'regular:new', 'regular:lost']
         .forEach(function (e) { SS.on(e, onChange); });
       onPhase();
     },

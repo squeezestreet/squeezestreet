@@ -27,8 +27,22 @@
     SIDEWALK_H: 90,      // depth of the walkable band, world units
     CHAR_H: 110,         // an adult is about this tall, world units
     // Passers-by keep to these lanes so nobody walks through the line:
-    PASS_LANES: [[0.04, 0.2], [0.72, 1.0]]
+    PASS_LANES: [[0.04, 0.2], [0.72, 1.0]],
+    // Dex the Dealer stands here, beside the stand, between the back lanes and the line
+    DEALER_X: 735,
+    DEALER_LANE: 0.3
   };
+
+  /* Regulars ----------------------------------------------------------
+   * A regular's loyalty multiplier from their streak (happy visits in a row).
+   * Shared so the sim, the art and the screens always show the same number. */
+  SS.LOYALTY = { step: 0.1, max: 2 };        // x1.1 per happy visit in a row, topping out at x2.0 (a 10-visit streak)
+  // The multiplier is a bonus paid on top of the price; it does not raise the most a regular will pay per cup.
+  SS.loyaltyMult = function (streak) {
+    return Math.min(SS.LOYALTY.max, 1 + SS.LOYALTY.step * Math.max(0, Math.floor(Number(streak) || 0)));
+  };
+  /** "x1.4" style label for a multiplier */
+  SS.fmtMult = function (m) { return 'x' + (Math.round((Number(m) || 1) * 10) / 10).toFixed(1); };
 
   /* Sim time ---------------------------------------------------------- */
   SS.DAY_LENGTH = 75;    // seconds of sim time in one business day (speed 1x)
@@ -149,7 +163,8 @@
    *   'bell'             {}
    *   'weather:change'   {type, temp}
    *   'event:trigger'    {id, title, desc, icon}   mid-day surprise or morning news
-   *   'cash'             {amount, delta, reason}
+   *   'cash'             {amount, delta, reason}   reason: 'sale'|'tip'|'loyalty'|'milestone'|'loan' (money in)
+   *                                            'supplies'|'flavor'|'upgrade'|'location'|'dealer' (money out)
    *   'reputation'       {value, delta}
    *   'milestone'        {id, title, reward}
    *   'win'              {}                    final milestone reached
@@ -160,6 +175,17 @@
    *   'settings'         {key, value}
    *   'toast'            {text, kind, icon}    kind: 'info'|'good'|'bad'
    *   'save'             {}
+   *   -- regulars --
+   *   'regular:new'      {regular, c}          a happy customer decided to come back (c = that customer)
+   *   'regular:visit'    {regular, c}          a regular has turned up today and is walking in
+   *   'regular:streak'   {regular, c, streak, mult}   served and happy: streak went up (streak/mult are the NEW values)
+   *   'regular:broken'   {regular, c, reason, shielded}   reason: 'taste'|'pricey'|'slow'|'wait'|'soldout'|'quit'
+   *                                            shielded true = a Streak Shield boost saved it (streak unchanged)
+   *   'regular:lost'     {regular}             two bad visits in a row: they stopped coming
+   *   'loyalty'          {c, amount, mult}     a regular paid a loyalty bonus on top of the price
+   *   -- Dex the Dealer --
+   *   'dealer:buy'       {id, kind, cost}      kind 'boost' | 'limited'
+   *   'boost:on'         {id}                  a boost became active (bought, or carried into the day)
    * UI -> everyone
    *   'pause'            {paused}
    *   'ui:open' / 'ui:close' {name}
@@ -278,8 +304,39 @@
     { id: 'pink', name: 'Pink Berry', color: '#FF8FB3', cost: 80, repReq: 2.4, wtp: 0.15, extraCost: 0.4, blurb: 'A swirl of strawberry.' },
     { id: 'mint', name: 'Cool Mint', color: '#9DEBA5', cost: 200, repReq: 3.0, wtp: 0.25, extraCost: 0.6, blurb: 'Extra refreshing on hot days.' },
     { id: 'mango', name: 'Mango Sunset', color: '#FFAE42', cost: 450, repReq: 3.7, wtp: 0.4, extraCost: 0.9, blurb: 'Tropical and golden.' },
-    { id: 'galaxy', name: 'Blue Galaxy', color: '#7FB8FF', cost: 1000, repReq: 4.4, wtp: 0.6, extraCost: 1.3, blurb: 'Nobody knows what is in it. Everybody wants it.' }
+    { id: 'galaxy', name: 'Blue Galaxy', color: '#7FB8FF', cost: 1000, repReq: 4.4, wtp: 0.6, extraCost: 1.3, blurb: 'Nobody knows what is in it. Everybody wants it.' },
+    // limited: true = never sold in the shop. Only Dex the Dealer offers them, one day at a time; once bought they are yours.
+    { id: 'cotton', name: 'Cotton Candy Fizz', color: '#FFB3E6', cost: 70, repReq: 0, wtp: 0.2, extraCost: 0.5, limited: true, blurb: 'Pink, fizzy and gone before you know it.' },
+    { id: 'watermelon', name: 'Watermelon Wave', color: '#FF6F7D', cost: 140, repReq: 0, wtp: 0.3, extraCost: 0.6, limited: true, blurb: 'Tastes like the best day of summer.' },
+    { id: 'sunrise', name: 'Sunrise Punch', color: '#FF9A3C', cost: 260, repReq: 0, wtp: 0.4, extraCost: 0.8, limited: true, blurb: 'Orange, peach and a little bit of magic.' },
+    { id: 'midnight', name: 'Midnight Grape', color: '#9B6BFF', cost: 480, repReq: 0, wtp: 0.55, extraCost: 1.0, limited: true, blurb: 'Dark, sparkly and very mysterious.' },
+    { id: 'rainbow', name: 'Rainbow Swirl', color: '#7CE0C3', cost: 900, repReq: 0, wtp: 0.75, extraCost: 1.4, limited: true, blurb: 'Every sip is a different colour.' }
   ];
+
+  /* Dex the Dealer's boosts. A boost lasts for one business day: bought in the morning it
+   * covers the day ahead, bought during the day it covers the rest of that day.
+   * cost = base price at Maple Street; the sim scales it up at richer locations. color = accent for cards and chips. */
+  DATA.boosts = [
+    { id: 'flyers', color: '#FF7A59', name: 'Flyer Blast', icon: 'newspaper', cost: 6, desc: '35% more people walk past today.' },
+    { id: 'golden', color: '#FFC83D', name: 'Golden Lemons', icon: 'lemon', cost: 8, desc: 'People will pay up to 25% more today.' },
+    { id: 'turbo', color: '#4CC3F0', name: 'Turbo Gloves', icon: 'juicer', cost: 5, desc: 'Every batch mixes twice as fast today.' },
+    { id: 'frost', color: '#9FE7FF', name: 'Frost Pack', icon: 'ice', cost: 4, desc: 'No ice melts today, not even overnight.' },
+    { id: 'lucky', color: '#35C977', name: 'Lucky Coin', icon: 'coin', cost: 6, desc: 'Every tip is doubled today.' },
+    { id: 'shield', color: '#FF5D8F', name: 'Streak Shield', icon: 'shield', cost: 7, desc: 'The first regular who leaves unhappy today keeps their streak.' },
+    { id: 'hype', color: '#7A5CFF', name: 'Hype Squad', icon: 'people', cost: 9, desc: 'Every one of your regulars shows up today.' }
+  ];
+
+  /* Names for regulars, by kind (the vip food critic never becomes a regular). */
+  DATA.regularNames = {
+    kid: ['Milo', 'Ruby', 'Theo', 'Zoe', 'Leo', 'Ivy', 'Finn', 'Nora'],
+    teen: ['Jaden', 'Priya', 'Max', 'Luna', 'Kai', 'Ava', 'Rico', 'Sky'],
+    parent: ['Dana', 'Marcus', 'Elena', 'Tom', 'Grace', 'Omar', 'Hana', 'Ben'],
+    jogger: ['Speedy Sam', 'Tess', 'Andre', 'Mia', 'Jo', 'Rafael', 'Kim', 'Lars'],
+    elder: ['Mr. Patel', 'Mrs. Rossi', 'Grandpa Joe', 'Miss Ada', 'Mr. Okafor', 'Aunt May', 'Mr. Lin', 'Mrs. Bell'],
+    tourist: ['Hiro', 'Ingrid', 'Paolo', 'Amara', 'Sven', 'Lucia', 'Yuki', 'Pierre'],
+    office: ['Ms. Grant', 'Raj', 'Chloe', 'Mr. Harris', 'Nadia', 'Victor', 'Jess', 'Mr. Chen'],
+    skater: ['Ollie', 'Dash', 'Rae', 'Zed', 'Kit', 'Bo', 'Juno', 'Flip']
+  };
 
   // Daily specials. known:true shows in the morning news, false is a mid-day surprise.
   DATA.events = [
@@ -315,6 +372,8 @@
     { id: 'cups120', title: 'Line around the block', desc: 'Sell 120 cups in one day.', kind: 'dayCups', target: 120, reward: 120 },
     { id: 'carnival', title: 'Under the lights', desc: 'Open your stand at Starlight Carnival.', kind: 'location', target: 'carnival', reward: 150 },
     { id: 'rep5', title: 'Five-star stand', desc: 'Reach 4.8 stars.', kind: 'rep', target: 4.8, reward: 200 },
+    { id: 'regulars5', title: 'Familiar faces', desc: 'Have 5 regulars at once.', kind: 'regulars', target: 5, reward: 20 },
+    { id: 'streak10', title: 'On a roll', desc: 'Get a regular to a 10-visit streak.', kind: 'streak', target: 10, reward: 60 },
     { id: 'mogul', title: 'Lemonade mogul', desc: 'Earn $10,000 in total sales.', kind: 'lifetime', target: 10000, reward: 0, final: true }
   ];
 
@@ -347,7 +406,24 @@
    *   lastResult: null | DayResult,             // set when the day ends
    *   settings: { sfx: true, music: true, speed: 1, reducedMotion: false },
    *   tutorial: { done: false },
-   *   won: false
+   *   won: false,
+   *   regulars: [Regular],                      // at most 12, oldest first
+   *   boosts: [boostId],                        // Dex's boosts active for the coming day (prep) or the current day (day); cleared when the day ends
+   *   dealer: null | { day, offers: [ { id, kind, sold } ] },  // Dex's stock for state.day (kind 'boost' | 'limited'); null on day 1
+   *   boostCost: 0,                             // what the boosts in state.boosts cost (goes on that day's DayResult)
+   *   nextRegular: 1                            // number for the next regular's id ('r' + n)
+   * }
+   * stats also holds bestStreak: the longest streak any regular ever reached (for the 'streak' milestone).
+   *
+   * Regular -------------------------------------------------------------
+   * {
+   *   id,                       // 'r1', 'r2', ... never reused
+   *   name, kind, seed,         // kind and seed are fixed, so a regular looks the same every visit
+   *   streak,                   // happy visits in a row; multiplier = SS.loyaltyMult(streak)
+   *   best,                     // longest streak they ever had
+   *   visits,                   // total visits
+   *   strikes,                  // unhappy visits in a row; two and they stop coming
+   *   since, lastDay            // day they became a regular, last day they visited
    * }
    *
    * DayRuntime (state.today) -------------------------------------------
@@ -363,7 +439,8 @@
    *   soldOut: null | 'lemons'|'sugar'|'ice'|'cups',
    *   weatherNow: { type, temp },           // can change mid-day
    *   missed: { pricey, wait, soldout, quit },
-   *   hourly: [9 numbers]                   // cups sold per hour bucket
+   *   hourly: [9 numbers],                  // cups sold per hour bucket
+   *   loyalty                               // loyalty bonus money regulars have paid today
    * }
    *
    * Customer ------------------------------------------------------------
@@ -378,7 +455,9 @@
    *   patience,                 // 0..1 left while waiting in line
    *   bubble: null | { type, ttl, max },
    *     // bubble types: thirsty pricey wait soldout happy love meh angry sour sweet watery warm tip star
-   *   qty                       // cups this customer orders (1..4)
+   *   qty,                      // cups this customer orders (1..4)
+   *   regularId,                // null, or the Regular id this customer is
+   *   streak, mult              // for regulars: streak and SS.loyaltyMult(streak) as they walk in (0 and 1 otherwise)
    * }
    *
    * DayResult (state.lastResult) ---------------------------------------
@@ -394,7 +473,14 @@
    *   hourly: [9 numbers],
    *   spoiled: { lemons, ice }, // lost overnight
    *   milestones: [ids],        // completed today
-   *   bestDay: bool, cashAfter
+   *   bestDay: bool, cashAfter,
+   *   loyalty,                  // loyalty bonus regulars paid today (included in profit)
+   *   boostCost,                // what Dex's boosts for this day cost (included in profit)
+   *   boosts: [boostId],        // boosts that were active
+   *   regulars: [ { id, name, kind, outcome, streak, mult, bonus, reason } ]
+   *     // everyone who was or became a regular today. outcome: 'new' | 'streak' | 'broken' | 'saved' | 'lost' | 'closed' | 'away'
+   *     // ('closed' = came by but the stand closed before they were served: streak kept, the visit counts)
+   *     // ('away' = a regular who did not come today; listed only when they had a streak of 3 or more, so the player notices)
    * }
    */
 
@@ -431,11 +517,20 @@
    *   upgradeInfo(id) -> { level, max, next: {cost,label,value}|null, canAfford }
    *   buyUpgrade(id) -> { ok, reason }
    *   locationInfo(id) -> { unlocked, current, canUnlock, reason }
-   *   unlockLocation(id) -> { ok, reason }      setLocation(id) -> { ok, reason }
+   *   unlockLocation(id) -> { ok, reason }      setLocation(id) -> { ok, reason }   (refused in prep once Dex's boosts are bought: they are priced for this spot)
    *   flavorInfo(id) -> { owned, current, canBuy, reason }
    *   buyFlavor(id) -> { ok, reason }
    *   milestoneProgress(id) -> { value, target, pct, done }
    *   cupsPerPitcher()  brewTime()  serveTime()  rent()
+   *   -- regulars --
+   *   regularsInfo() -> [ { id, name, kind, seed, streak, best, visits, mult, since, lastDay } ]   best streaks first
+   *   -- Dex the Dealer (open in 'prep' and 'day'; gone in 'results' and on day 1) --
+   *   dealerInfo() -> { present, line, offers: [ { id, kind, name, desc, icon, color, cost, sold, canBuy, reason } ], active: [boostId] }
+   *       line = one short thing Dex says today (changes daily). kind 'limited' offers carry the flavor's color.
+   *   buyDeal(id) -> { ok, reason }   id is a boost id or a limited flavor id from today's offers
+   *       In the morning Dex never takes the cash Grandma would have to replace (keep enough for a few cups of supplies).
+   *       Hype Squad is not sold late in the day, when regulars could no longer reach the stand.
+   *   boostActive(id) -> bool
    *
    * SS.Render (js/render.js)  owns both canvases, SS.view and SS.env, and calls, in order:
    *   SS.Sky.draw(ctx, view, env)            full-canvas sky: gradient, stars, sun, moon, clouds
@@ -467,7 +562,7 @@
    *   reduced                    // true = tone motion down
    * }
    *
-   * SS.Actors.hit(sx, sy) -> null | {type:'tip', id} | {type:'stand'}   // screen-space hit test
+   * SS.Actors.hit(sx, sy) -> null | {type:'tip', id} | {type:'dealer'} | {type:'stand'}   // screen-space hit test, in that priority
    *
    * SS.FX   (js/fx.js)   listens to the bus by itself. Also:
    *   shake(magPx, seconds)  shakeOffset() -> {x, y}
@@ -486,7 +581,7 @@
    *
    * SS.Screens (js/screens.js)  renders prep and results into #sheet, plus shop / map / goals modals
    *   init()
-   *   open(name)                 'shop' | 'map' | 'goals'
+   *   open(name)                 'shop' | 'map' | 'goals' | 'dealer'
    *
    * SS.ICONS (js/icons.js)  { name: '<svg viewBox="0 0 48 48" ...>...</svg>' }
    *

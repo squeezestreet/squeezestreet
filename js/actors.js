@@ -1,4 +1,5 @@
-/* Squeeze Street — actors.js: the stand, the vendor, customers, bubbles and tip coins.
+/* Squeeze Street — actors.js: the stand, the vendor, customers, bubbles, tip coins, the badges
+ * over regulars, and Dex the Dealer with his rolling trunk. SS.Actors.dealerPos() tells FX where Dex is.
  * shortcut: one compact rig for all nine customer kinds (props tell them apart), upgrade to
  * per-kind rigs and richer stand tiers if the art needs to carry more. */
 (function () {
@@ -16,9 +17,17 @@
     { body: '#ff6257', trim: '#ffd83d', top: '#d83a30', text: '#ffffff' }
   ];
   var looks = new Map(), tapT = 0, bellT = 0, cheerT = 0;
+  // Dex the Dealer: his colours, the glow of each boost bottle, and what he is up to
+  var DEX = { skin: '#d9a273', hair: '#2a1f4d', blazer: '#6c3fd6', lapel: '#46289a', pants: '#2b2a4a', gold: '#ffd83d', square: '#ffe14d', trunk: '#b4562e', drawer: '#96421f', velvet: '#2c1e46' };
+  var EMPTY = [], dex = { on: false, offers: EMPTY, cols: [], sold: false, lim: false, edge: 1e9, hudL: 1e9, hudB: -1e9, at: -1e9 };
+  var spot = { x: 0, y: 0, s: 1, off: 64, tx: 0, lift: 0, dx: 0, edge: 1e9 };
+  var dealT = 0, lookT = 0, lookCD = 0, limT = 0, glowT = {}, glows = {};
   SS.on('brew:tap', function () { tapT = 0.22; });
   SS.on('bell', function () { bellT = 0.9; });
-  SS.on('sale', function () { cheerT = 0.45; });
+  SS.on('sale', function () { cheerT = 0.45; if (lookCD <= 0) { lookT = 1.3; lookCD = 4.5; } });   // Dex reacts, but not to every single cup
+  SS.on('dealer:buy', function () { dealT = 1.5; lookT = 0; dex.at = -1e9; });
+  SS.on('boost:on', function (p) { if (p && p.id) glowT[p.id] = 1.6; dex.at = -1e9; });
+  SS.on('phase', function () { dex.at = -1e9; });
 
   function pick(list, r) { return list[Math.min(list.length - 1, Math.floor(r * list.length))]; }
   function lookOf(c) {
@@ -145,37 +154,137 @@
     var s = view.laneScale(c.lane), x = view.toX(c.x), y = view.laneY(c.lane), l = lookOf(c);
     var standing = c.state === 'queue' || c.state === 'order' || !(c.speed > 1);
     var face = standing && (c.state === 'queue' || c.state === 'order') ? 1 : (c.dir < 0 ? -1 : 1);
+    // a regular on a long streak waves at the vendor as they walk up
+    var wave = c.regularId && c.streak >= 5 && !c.hasDrink && (c.state === 'approach' || (c.state === 'queue' && c.stateT < 1.4));
     shadow(ctx, x, y, 22 * l.s, s);
     ctx.save(); ctx.translate(x, y); ctx.scale(s * face, s);
     var top = person(ctx, l, {
       kind: c.kind, phase: standing ? null : c.x * 0.11, breath: env.t * 2 + c.id, mood: c.mood || 0,
-      drink: c.hasDrink ? flavorCol : null, armUp: c.state === 'order' ? 0.7 : 0,
+      drink: c.hasDrink ? flavorCol : null, armUp: c.state === 'order' ? 0.7 : wave ? 0.78 + 0.22 * Math.sin(env.t * 15 + c.id) : 0,
       bob: c.state === 'queue' && c.patience < 0.4 ? Math.abs(Math.sin(env.t * 9 + c.id)) * 2 : 0
     });
-    if (env.weather.wet > 0.4 && !standing) {              // umbrella in the rain
+    l.top = top; l.brolly = env.weather.wet > 0.4 && !standing;
+    if (l.brolly) {                                         // umbrella in the rain
       ctx.strokeStyle = INK; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(8, -top * 0.6); ctx.lineTo(8, -top - 26); ctx.stroke();
       ctx.beginPath(); ctx.arc(8, -top - 22, 34, Math.PI, 0); ctx.closePath(); ctx.fillStyle = l.shirt; ctx.fill(); ctx.stroke();
     }
     if (c.kind === 'vip') star(ctx, 0, -top - 14 + Math.sin(env.t * 4) * 2, 7, '#ffd83d');
     ctx.restore();
-    if (c.state === 'queue' && c.patience < 0.4) {         // patience running out
-      var bw = 34 * s, bx = x - bw / 2, by = y - (top + 12) * s;
-      ctx.fillStyle = INK; ctx.fillRect(bx - 2, by - 2, bw + 4, 9);
-      ctx.fillStyle = c.patience < 0.18 ? '#ff6257' : '#ffd83d'; ctx.fillRect(bx, by, bw * SS.clamp(c.patience / 0.4, 0, 1), 5);
-    }
-    if (c.bubble && c.bubble.ttl > 0) bubble(ctx, c.bubble, x + 4 * s, y - (top + 34) * s, s);
   }
 
-  function drawStand(ctx, view, env, st) {
+  /* Everything that floats over a head, drawn after all the bodies so nobody walks over it.
+     Stacked upward so nothing collides: regular's badge and name, patience bar, speech bubble. */
+  function drawOverhead(ctx, view, env, c, st, today) {
+    var s = view.laneScale(c.lane), x = view.toX(c.x), y = view.laneY(c.lane), l = lookOf(c), top = l.top || W.CHAR_H;
+    var cy = y - (top + 10) * s, qi = inLine(c) && today && today.queue ? today.queue.indexOf(c.id) : -1, a, b;
+    if (c.regularId) cy = regMarks(ctx, env, c, st, x + 2 * s, qi >= 0 && qBase[qi] < 1e9 ? qBase[qi] : cy - hatLift(c, l) * s, s, qi >= 0);
+    if (qi >= 0) {                                          // in line: float above the neighbours' badges
+      a = qTop[qi - 1]; b = qTop[qi + 1];
+      if (a < cy) cy = a - 2 * s;
+      if (b < cy) cy = b - 2 * s;
+    }
+    if (c.state === 'queue' && c.patience < 0.4) {         // patience running out
+      var bw = 34 * s, bx = x - bw / 2;
+      ctx.fillStyle = INK; ctx.fillRect(bx - 2, cy - 9, bw + 4, 9);
+      ctx.fillStyle = c.patience < 0.18 ? '#ff6257' : '#ffd83d'; ctx.fillRect(bx, cy - 7, bw * SS.clamp(c.patience / 0.4, 0, 1), 5);
+      cy -= 12;
+    }
+    if (c.bubble && c.bubble.ttl > 0) bubble(ctx, c.bubble, x + 4 * s, cy - 24 * s, s);
+  }
+
+  /* Regulars: a heart badge with their loyalty multiplier, a flame with the streak from 3 up,
+     and their name while they are in line. Drawn in world units around (x, cy), bottom edge at cy. */
+  var F_BADGE = '900 11px Figtree, system-ui, sans-serif', F_NAME = '800 11px Figtree, system-ui, sans-serif', F_FLAME = '900 10px Figtree, system-ui, sans-serif';
+  var wBadge = new Map(), wName = new Map();               // measured text widths, one map per font
+  function textW(ctx, font, map, txt) {
+    var w = map.get(txt);
+    if (w === undefined) { if (map.size > 200) map.clear(); ctx.font = font; w = ctx.measureText(txt).width; map.set(txt, w); }
+    return w;
+  }
+  if (document.fonts && document.fonts.addEventListener) document.fonts.addEventListener('loadingdone', function () { wBadge.clear(); wName.clear(); });
+  function heartPath(ctx, x, y, r) {
+    ctx.beginPath(); ctx.moveTo(x, y + r * 0.95);
+    ctx.bezierCurveTo(x - r * 1.55, y - r * 0.05, x - r * 0.9, y - r * 1.3, x, y - r * 0.42);
+    ctx.bezierCurveTo(x + r * 0.9, y - r * 1.3, x + r * 1.55, y - r * 0.05, x, y + r * 0.95);
+    ctx.closePath();
+  }
+  function pill(ctx, x, y, w, h, fill) { rr(ctx, x - w / 2, y - h / 2, w, h, h / 2); ctx.fillStyle = fill; ctx.fill(); ctx.strokeStyle = INK; ctx.lineWidth = 2.5; ctx.stroke(); }
+  function inkText(ctx, txt, x, y, fill, lw) { ctx.lineJoin = 'round'; ctx.strokeStyle = INK; ctx.lineWidth = lw; ctx.strokeText(txt, x, y); ctx.fillStyle = fill; ctx.fillText(txt, x, y); }
+  function flame(ctx, x, y, r, wob) {
+    ctx.save(); ctx.translate(x, y); ctx.scale(1 - wob * 0.5, 1 + wob);
+    ctx.beginPath(); ctx.moveTo(0, -r * 1.45);
+    ctx.bezierCurveTo(r * 0.5, -r * 0.75, r * 1.05, -r * 0.4, r * 0.95, r * 0.25); ctx.arc(0, r * 0.25, r * 0.95, 0, Math.PI);
+    ctx.bezierCurveTo(-r * 1.05, -r * 0.35, -r * 0.35, -r * 0.5, 0, -r * 1.45); ctx.closePath();
+    ctx.fillStyle = '#ff7a1a'; ctx.fill(); ctx.strokeStyle = INK; ctx.lineWidth = 2.2; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, -r * 0.55); ctx.quadraticCurveTo(r * 0.62, 0, r * 0.5, r * 0.4); ctx.arc(0, r * 0.4, r * 0.5, 0, Math.PI); ctx.quadraticCurveTo(-r * 0.62, 0, 0, -r * 0.55);
+    ctx.fillStyle = '#ffd83d'; ctx.fill();
+    ctx.restore();
+  }
+  function regName(st, id) {
+    var r = st && st.regulars;
+    if (r) for (var i = 0; i < r.length; i++) if (r[i] && r[i].id === id) return r[i].name || null;
+    return null;
+  }
+  function inLine(c) { return c.state === 'queue' || c.state === 'order'; }
+  function hatLift(c, l) { return l.brolly ? 50 : c.kind === 'tourist' ? 14 : c.kind === 'vip' ? 20 : 0; }
+  /* Regulars standing next to each other in line: the odd slots lift their badges clear of
+     their neighbours', so name pills never collide (screen px, per line slot). */
+  var qBase = [], qTop = [], qH = [];
+  function lineMarks(view, list, today, st) {
+    var q = today && today.queue, i, c, qi, l, s, nb;
+    qBase.length = qTop.length = qH.length = 0;
+    if (!q) return;
+    for (i = 0; i < q.length; i++) { qBase[i] = qTop[i] = 1e9; qH[i] = 0; }
+    for (i = 0; i < list.length; i++) {
+      c = list[i];
+      if (!c.regularId || !inLine(c) || (qi = q.indexOf(c.id)) < 0) continue;
+      l = lookOf(c); s = view.laneScale(c.lane);
+      qBase[qi] = view.laneY(c.lane) - ((l.top || W.CHAR_H) + 10 + hatLift(c, l)) * s;
+      qH[qi] = (regName(st, c.regularId) ? 44 : 24) * s; qTop[qi] = qBase[qi] - qH[qi];
+    }
+    for (qi = 1; qi < q.length; qi += 2) {
+      if (!qH[qi]) continue;
+      nb = Math.min(qTop[qi - 1], qi + 1 < q.length ? qTop[qi + 1] : 1e9) - 3;
+      if (nb < qBase[qi]) { qBase[qi] = nb; qTop[qi] = nb - qH[qi]; }
+    }
+  }
+  function regMarks(ctx, env, c, st, x, cy, s, named) {
+    var name = named ? regName(st, c.regularId) : null, l = lookOf(c), streak = c.streak | 0, fl = streak >= 3, label;
+    if (l.mk !== c.mult || l.sk !== streak) { l.mk = c.mult; l.sk = streak; l.lab = SS.fmtMult(c.mult > 0 ? c.mult : SS.loyaltyMult(streak)); l.num = String(streak); }   // labels made once, not every frame
+    label = l.lab;
+    ctx.save(); ctx.translate(x, cy); ctx.scale(s, s);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    var tw = textW(ctx, F_BADGE, wBadge, label), w = tw + 27, gw = w + (fl ? 13 : 0), L = -gw / 2;
+    pill(ctx, L + w / 2, -9, w, 17, '#e8407a');
+    heartPath(ctx, L + 9.5, -9.5, 7); ctx.fillStyle = '#ffffff'; ctx.fill(); ctx.strokeStyle = INK; ctx.lineWidth = 2; ctx.stroke();
+    ctx.font = F_BADGE; ctx.fillStyle = '#ffffff'; ctx.fillText(label, L + 19 + tw / 2, -8.5);
+    if (fl) {
+      flame(ctx, L + w + 4, -11, 8.5, env.reduced ? 0 : 0.06 * Math.sin(env.t * 13 + c.id));
+      ctx.font = F_FLAME; inkText(ctx, l.num, L + w + 4, -8, '#ffffff', 3);
+    }
+    var h = 20;
+    if (name) {
+      var nw = textW(ctx, F_NAME, wName, name) + 14;
+      pill(ctx, 0, -h - 9, nw, 16, '#ffffff');
+      ctx.font = F_NAME; ctx.fillStyle = INK; ctx.fillText(name, 0, -h - 8.5);
+      h += 20;
+    }
+    ctx.restore();
+    return cy - (h + 4) * s;
+  }
+
+  /* dl = how far right of the stand's centre the dealer's left edge is (stand units); when he
+     stands close, the sandwich board moves to the left of the stand and the cooler tucks in at the front. */
+  function drawStand(ctx, view, env, st, dl) {
     var up = (st && st.upgrades) || {}, today = st && st.today, tier = TIER[SS.clamp(up.stand | 0, 0, 3)];
     var s = view.laneScale(W.STAND_LANE), x = view.toX(W.STAND_X), y = view.laneY(W.STAND_LANE);
     var fl = DATA.byId(DATA.flavors, (st && st.flavor) || 'classic') || DATA.flavors[0], light = SS.light(env.dayT);
-    var squash = tapT > 0 ? Math.sin(tapT / 0.22 * Math.PI) * 0.06 : 0, hw = W.STAND_W / 2;
+    var squash = tapT > 0 ? Math.sin(tapT / 0.22 * Math.PI) * 0.06 : 0, hw = W.STAND_W / 2, tuck = dl < 157;
     shadow(ctx, x, y + 2 * s, 120, s);
     ctx.save(); ctx.translate(x, y); ctx.scale(s * (1 + squash), s * (1 - squash));
-    if (up.cooler) { box(ctx, 104, -40, 46, 40, 6, '#4cc3f0'); box(ctx, 101, -48, 52, 12, 5, '#ffffff'); }
+    if (up.cooler && !tuck) { box(ctx, 104, -40, 46, 40, 6, '#4cc3f0'); box(ctx, 101, -48, 52, 12, 5, '#ffffff'); }
     if (up.speaker) { box(ctx, -150, -46, 34, 46, 6, '#3d4a5c'); ctx.fillStyle = '#c9cde6'; ctx.beginPath(); ctx.arc(-133, -20, 10 + Math.sin(env.t * 12) * 1.2, 0, TAU); ctx.fill(); }
-    if ((up.sign | 0) >= 2) { ctx.fillStyle = '#ffd83d'; ctx.strokeStyle = INK; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(176, 0); ctx.lineTo(192, -62); ctx.lineTo(224, -62); ctx.lineTo(238, 0); ctx.closePath(); ctx.fill(); ctx.stroke(); star(ctx, 208, -34, 11, '#ff6257'); }
+    if ((up.sign | 0) >= 2) { var bx = dl >= 206 ? 152 : -216; ctx.fillStyle = '#ffd83d'; ctx.strokeStyle = INK; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(bx, 0); ctx.lineTo(bx + 16, -62); ctx.lineTo(bx + 46, -62); ctx.lineTo(bx + 60, 0); ctx.closePath(); ctx.fill(); ctx.stroke(); star(ctx, bx + 31, -34, 11, '#ff6257'); }
     // shade
     if ((up.awning | 0) >= 2 || (up.stand | 0) >= 2) {
       var sway = Math.sin(env.t * 1.6) * 3 * (env.wind || 0);
@@ -216,6 +325,7 @@
       if (light.night > 0.3) { var g = ctx.createRadialGradient(0, -232, 4, 0, -232, 90); g.addColorStop(0, 'rgba(255,93,143,' + (0.5 * light.night) + ')'); g.addColorStop(1, 'rgba(255,93,143,0)'); ctx.fillStyle = g; ctx.fillRect(-90, -322, 180, 180); }
       box(ctx, -44, -246, 88, 28, 8, INK); ctx.font = '20px "Bagel Fat One", system-ui, sans-serif'; ctx.fillStyle = '#ff8fb3'; ctx.fillText('OPEN', 0, -231);
     }
+    if (up.cooler && tuck) { box(ctx, -124, -24, 40, 24, 5, '#4cc3f0'); box(ctx, -127, -31, 46, 10, 4, '#ffffff'); }
     // on the counter: bell, cups, tip jar, pitcher
     ctx.save(); ctx.translate(-70, -82); ctx.rotate(bellT > 0 ? Math.sin(bellT * 26) * 0.5 * bellT : 0);
     ctx.beginPath(); ctx.arc(0, -2, 9, Math.PI, 0); ctx.closePath(); ctx.fillStyle = '#ffd83d'; ctx.fill(); ctx.strokeStyle = INK; ctx.lineWidth = 2.5; ctx.stroke(); ctx.restore();
@@ -257,31 +367,312 @@
     }
   }
 
+  /* ------------------------------------------------------------------ *
+   * Dex the Dealer and his rolling trunk
+   * ------------------------------------------------------------------ */
+  /** is Dex here? Re-read a few times a second (and on his events), not every frame */
+  function dexOn(st) {
+    var now = performance.now(), ph = st && st.phase, info = null, i, o, f, sh, sc, r, c;
+    if (now - dex.at < 250) return dex.on;
+    dex.at = now; dex.on = false; dex.offers = EMPTY; dex.edge = 1e9; dex.hudL = 1e9; dex.hudB = -1e9;
+    if (ph === 'prep' || ph === 'day') {
+      if (SS.Sim && SS.Sim.dealerInfo) { try { info = SS.Sim.dealerInfo(); } catch (e) { info = null; } }
+      if (info) { dex.on = !!info.present; dex.offers = info.offers || EMPTY; }
+      else if (st.dealer && st.dealer.day === st.day) { dex.on = true; dex.offers = st.dealer.offers || EMPTY; }
+    }
+    dex.cols.length = 0; dex.sold = dex.offers.length > 0; dex.lim = false;
+    for (i = 0; i < dex.offers.length; i++) {
+      o = dex.offers[i] || {};
+      f = DATA.byId(o.kind === 'limited' ? DATA.flavors : DATA.boosts || EMPTY, o.id);
+      dex.cols.push(o.color || (f && f.color) || '#ffd83d');
+      if (!o.sold) dex.sold = false;
+      if (o.kind === 'limited' && !o.sold) dex.lim = true;
+    }
+    if (dex.on) {                                          // a sheet docked on the right hides that part of the scene
+      sh = document.getElementById('sheet'); sc = document.getElementById('scene');
+      if (sh && sc && !sh.hidden && sh.dataset.mode !== 'center') {
+        r = sh.getBoundingClientRect(); c = sc.getBoundingClientRect();
+        if (r.width && r.height && r.width < c.width * 0.8) dex.edge = r.left - c.left;
+      }
+      sh = document.querySelectorAll('#hud > .hud-stats, #hud > .hud-deals');      // the pills over the top right of the scene
+      for (i = 0; sc && i < sh.length; i++) {
+        r = sh[i].getBoundingClientRect(); c = sc.getBoundingClientRect();
+        if (r.width && r.height) { dex.hudL = Math.min(dex.hudL, r.left - c.left); dex.hudB = Math.max(dex.hudB, r.bottom - c.top); }
+      }
+    }
+    return dex.on;
+  }
+  /** where Dex and his trunk stand, in screen px. Beside the stand when there is room; on narrow
+      screens he shrinks a little, stays fully on screen and the trunk tucks in behind him. */
+  function dexLayout(view) {
+    var s = view.laneScale(W.DEALER_LANE), ls = view.laneScale(W.STAND_LANE), sx = view.toX(W.STAND_X), xw = view.toX(W.DEALER_X);
+    var edge = Math.min(view.w, dex.edge) - 3, y = view.laneY(W.DEALER_LANE), up = (SS.state && SS.state.upgrades) || {}, xmin, lim;
+    if (y - 200 * s < dex.hudB) edge = Math.min(edge, dex.hudL - 6);       // a short scene: keep his sign out from under the HUD
+    // the stand's counter, and its awning if it has one (the beach umbrella reaches further right)
+    var aw = (up.awning | 0) >= 2 || (up.stand | 0) >= 2 ? 108 : up.awning ? 160 : 0, standR = sx + 100 * ls, awR = sx + aw * ls;
+    var x = Math.min(xw, edge - 106 * s), off = 64;
+    if (x - 26 * s < standR) {
+      s *= SS.clamp((edge - standR) / (80 * s), 0.8, 1);
+      xmin = standR + 32 * s;                                // a step clear of the counter
+      off = SS.clamp((edge - 42 * s - xmin) / s, 14, 64);
+      x = Math.min(Math.max(xmin, edge - (off + 42) * s), xw, edge - 22 * s);
+    }
+    spot.x = x; spot.y = y; spot.s = s; spot.off = off; spot.tx = x + off * s; spot.edge = edge;
+    spot.lift = off < 44 ? 26 : 0;                         // trunk behind him: lift the sign clear of his hair
+    lim = (spot.lift ? 31 : 48);
+    spot.dx = Math.min(0, (edge - lim * s - spot.tx) / s);   // and slide it left so it stays readable
+    // no room for the sign beside the awning: hang it higher, above the awning
+    if (aw && spot.tx + (spot.dx - (spot.lift ? 27 : 42)) * s < awR) spot.lift = Math.max(spot.lift, Math.ceil(222 * ls / s - 116));
+    return spot;
+  }
+  function hexRgb(h) { var n = parseInt(String(h).slice(1, 7), 16); if (!(n >= 0)) n = 0xffd83d; return (n >> 16 & 255) + ',' + (n >> 8 & 255) + ',' + (n & 255); }
+  /** a soft round glow, painted once per colour */
+  function glowOf(col) {
+    var g = glows[col], x, gr, rgb;
+    if (g) return g;
+    g = document.createElement('canvas'); g.width = g.height = 64; x = g.getContext('2d'); rgb = hexRgb(col);
+    gr = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+    gr.addColorStop(0, 'rgba(255,255,255,0.95)'); gr.addColorStop(0.18, 'rgba(' + rgb + ',0.85)'); gr.addColorStop(0.5, 'rgba(' + rgb + ',0.32)'); gr.addColorStop(1, 'rgba(' + rgb + ',0)');
+    x.fillStyle = gr; x.fillRect(0, 0, 64, 64);
+    return (glows[col] = g);
+  }
+  function shoe(ctx, x) { box(ctx, x - 6, -8, 18, 8, 4, '#ffffff'); ctx.fillStyle = INK; ctx.fillRect(x - 5, -6.5, 5, 5); }
+  /** one arm: blazer sleeve in two parts, a shirt cuff and a hand. hand: 0 fist, 1 open palm, 2 thumb up, 3 finger gun, 4 beckoning finger */
+  function arm(ctx, sx, sy, ex, ey, hx, hy, hand, fa) {
+    limb(ctx, sx, sy, ex, ey, 9, DEX.blazer); limb(ctx, ex, ey, hx, hy, 8, DEX.blazer);
+    var ux = hx - ex, uy = hy - ey, d = Math.sqrt(ux * ux + uy * uy) || 1;
+    ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(hx - ux / d * 2, hy - uy / d * 2, 4.4, 0, TAU); ctx.fill();
+    if (hand === 2) limb(ctx, hx + 1, hy - 3, hx + 1, hy - 11, 3, DEX.skin);
+    else if (hand === 3) { limb(ctx, hx + 2, hy - 1, hx + 11, hy - 2, 3, DEX.skin); limb(ctx, hx, hy - 3, hx + 1, hy - 9, 2.6, DEX.skin); }
+    else if (hand === 4) limb(ctx, hx, hy - 2, hx + Math.cos(fa) * 8, hy - 2 + Math.sin(fa) * 8, 2.8, DEX.skin);
+    ctx.beginPath();
+    if (hand === 1) ctx.ellipse(hx + 1, hy, 6.5, 4.2, -0.25, 0, TAU); else ctx.arc(hx, hy, 5, 0, TAU);
+    ctx.fillStyle = DEX.skin; ctx.fill(); ctx.strokeStyle = INK; ctx.lineWidth = 2.5; ctx.stroke();
+  }
+  /* Dex himself, facing +x, origin at his feet.
+     pose: 0 idle, 1 beckon, 2 coin flip, 3 presenting the trunk, 4 double thumbs-up, 5 relaxed, 6 finger guns; k = 0..1 through it */
+  function dexRig(ctx, env, pose, k) {
+    var t = env.t, red = env.reduced, H = 116, br = Math.sin(t * 2.2) * (red ? 0.6 : 1.3), lean = pose === 5 ? -0.14 : pose === 6 ? 0.06 : 0;
+    var hip = -0.44 * H, sh = -0.77 * H - br, hy = -0.905 * H - br, hr = 0.15 * H, e, a, fx, fy, ex, ey, hx, hy2, u, pump;
+    limb(ctx, -3, hip, -6, -6, 10, DEX.pants); limb(ctx, 4, hip, 11, -6, 10, DEX.pants);
+    shoe(ctx, -6); shoe(ctx, 11);
+    ctx.save(); ctx.translate(0, hip); ctx.rotate(lean); ctx.translate(0, -hip);
+    // back arm: hand on hip, behind his head (relaxed), or up for the second thumb
+    if (pose === 5) arm(ctx, -6, sh + 7, -23, sh - 9, -9, hy - 1, 0);
+    else if (pose !== 4) arm(ctx, -6, sh + 7, -20, sh + 25, -13, hip + 3, 0);
+    // blazer, shirt, lapels, gold chain, pocket square, buttons
+    box(ctx, -0.165 * H, sh, 0.33 * H, hip - sh + 11, 0.07 * H, DEX.blazer);
+    ctx.beginPath(); ctx.moveTo(-3, sh + 1.5); ctx.lineTo(15, sh + 1.5); ctx.lineTo(6, sh + 25); ctx.closePath(); ctx.fillStyle = '#fff6e8'; ctx.fill();
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = DEX.lapel; ctx.lineWidth = 4.5;
+    ctx.beginPath(); ctx.moveTo(-4, sh + 2); ctx.lineTo(6, sh + 28); ctx.lineTo(16, sh + 2); ctx.stroke();
+    ctx.strokeStyle = INK; ctx.lineWidth = 4.6; ctx.beginPath(); ctx.arc(6, sh + 2, 10, 0.2 * Math.PI, 0.8 * Math.PI); ctx.stroke();
+    ctx.strokeStyle = DEX.gold; ctx.lineWidth = 2.4; ctx.stroke();
+    ctx.beginPath(); ctx.arc(6, sh + 13.5, 3.6, 0, TAU); ctx.fillStyle = DEX.gold; ctx.fill(); ctx.strokeStyle = INK; ctx.lineWidth = 1.8; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-12, sh + 17); ctx.lineTo(-8.5, sh + 9.5); ctx.lineTo(-5.5, sh + 17); ctx.closePath();
+    ctx.fillStyle = '#fff4b8'; ctx.fill(); ctx.strokeStyle = INK; ctx.lineWidth = 1.6; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-15.5, sh + 17); ctx.quadraticCurveTo(-14, sh + 9, -11.5, sh + 7.5); ctx.quadraticCurveTo(-10.5, sh + 12, -8, sh + 17); ctx.closePath();
+    ctx.fillStyle = DEX.square; ctx.fill(); ctx.stroke();
+    ctx.strokeStyle = DEX.lapel; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(-16, sh + 17.5); ctx.lineTo(-5, sh + 17.5); ctx.stroke();
+    ctx.fillStyle = DEX.gold; ctx.beginPath(); ctx.arc(6, sh + 34, 2, 0, TAU); ctx.arc(6, sh + 42, 2, 0, TAU); ctx.fill();
+    pump = red ? 0 : -Math.abs(Math.sin(k * TAU * 2.5)) * 3;
+    if (pose === 4) arm(ctx, -6, sh + 7, 4, sh + 25, 13, sh + 2 + pump, 2);
+    if (pose === 5) arm(ctx, 5, sh + 7, 18, sh - 12, 3, hy - 4, 0);
+    // head: ear, pompadour, shades, big grin with a gold tooth
+    ctx.fillStyle = DEX.skin; ctx.fillRect(-4, hy + hr * 0.6, 9, 9);
+    ctx.beginPath(); ctx.arc(0, hy, hr, 0, TAU); ctx.fillStyle = DEX.skin; ctx.fill(); ctx.strokeStyle = INK; ctx.lineWidth = 3; ctx.stroke();
+    ctx.beginPath(); ctx.arc(-hr * 0.3, hy + hr * 0.12, hr * 0.22, 0, TAU); ctx.fill(); ctx.lineWidth = 2; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-hr * 0.55, hy + hr * 0.4); ctx.lineTo(-hr * 0.98, hy - hr * 0.05);
+    ctx.bezierCurveTo(-hr * 1.18, hy - hr * 1.05, -hr * 0.2, hy - hr * 1.55, hr * 0.55, hy - hr * 1.58);
+    ctx.bezierCurveTo(hr * 1.3, hy - hr * 1.62, hr * 1.5, hy - hr * 1.0, hr * 1.08, hy - hr * 0.74);
+    ctx.bezierCurveTo(hr * 0.8, hy - hr * 0.55, hr * 0.32, hy - hr * 0.74, -hr * 0.08, hy - hr * 0.56);
+    ctx.quadraticCurveTo(-hr * 0.36, hy - hr * 0.2, -hr * 0.28, hy + hr * 0.4); ctx.closePath();
+    ctx.fillStyle = DEX.hair; ctx.fill(); ctx.strokeStyle = INK; ctx.lineWidth = 3; ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,255,255,.5)'; ctx.lineWidth = 2.4; ctx.beginPath(); ctx.moveTo(-hr * 0.55, hy - hr * 1.02); ctx.quadraticCurveTo(0, hy - hr * 1.42, hr * 0.68, hy - hr * 1.4); ctx.stroke();
+    ctx.strokeStyle = INK; ctx.lineWidth = 2.4; ctx.beginPath(); ctx.moveTo(hr * 0.05, hy - hr * 0.12); ctx.lineTo(-hr * 0.34, hy - hr * 0.04); ctx.stroke();
+    rr(ctx, hr * 0.02, hy - hr * 0.32, hr * 1.02, hr * 0.44, hr * 0.18); ctx.fillStyle = '#231d4a'; ctx.fill(); ctx.strokeStyle = INK; ctx.lineWidth = 2.4; ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,255,255,.75)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(hr * 0.28, hy - hr * 0.24); ctx.lineTo(hr * 0.44, hy - hr * 0.0); ctx.moveTo(hr * 0.72, hy - hr * 0.24); ctx.lineTo(hr * 0.8, hy - hr * 0.12); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(hr * 0.1, hy + hr * 0.3); ctx.quadraticCurveTo(hr * 0.52, hy + hr * 1.0, hr * 0.98, hy + hr * 0.2); ctx.quadraticCurveTo(hr * 0.55, hy + hr * 0.42, hr * 0.1, hy + hr * 0.3); ctx.closePath();
+    ctx.fillStyle = '#ffffff'; ctx.fill(); ctx.strokeStyle = INK; ctx.lineWidth = 2.2; ctx.stroke();
+    ctx.fillStyle = DEX.gold; ctx.fillRect(hr * 0.5, hy + hr * 0.37, hr * 0.15, hr * 0.17);
+    if (!red && pose === 0 && ((t % 7.2) + 7.2) % 7.2 > 2.1 && ((t % 7.2) + 7.2) % 7.2 < 2.45) star(ctx, hr * 0.62, hy + hr * 0.42, 4.5, '#fff4b8');   // ting!
+    // front arm
+    if (pose === 1) {                                      // "come here": arm up, the hand curls in again and again
+      e = SS.smooth(Math.min(k, 1 - k) / 0.16); a = -1.45 - 0.35 * Math.sin(k * TAU * 3);
+      ex = SS.lerp(12, 25, e); ey = SS.lerp(sh + 27, sh + 21, e);
+      arm(ctx, 5, sh + 7, ex, ey, SS.lerp(22, ex + Math.cos(a) * 15, e), SS.lerp(sh + 31, ey + Math.sin(a) * 15, e), e > 0.5 ? 4 : 1, a - 1.3 - 0.9 * Math.sin(k * TAU * 3));
+    } else if (pose === 2) {                               // flips a coin and catches it
+      u = SS.clamp((k - 0.12) / 0.72, 0, 1); hx = 22; hy2 = sh + 17 - (k < 0.14 || u >= 1 ? 3 : 0);
+      arm(ctx, 5, sh + 7, 13, sh + 26, hx, hy2, 0);
+      fx = hx + 1; fy = hy2 - 7 - Math.sin(Math.PI * u) * 50;
+      ctx.beginPath(); ctx.ellipse(fx, fy, 4.6 * Math.max(0.15, Math.abs(Math.cos(u * Math.PI * 7))), 4.6, 0, 0, TAU);
+      ctx.fillStyle = DEX.gold; ctx.fill(); ctx.strokeStyle = INK; ctx.lineWidth = 1.8; ctx.stroke();
+    } else if (pose === 3) arm(ctx, 5, sh + 7, 19, sh + 19, 33, sh + 15, 1);
+    else if (pose === 4) arm(ctx, 5, sh + 7, 17, sh + 22, 25, sh + 4 + pump, 2);
+    else if (pose === 6) arm(ctx, 5, sh + 7, 17, sh + 17, 28, sh + 13, 3);
+    else if (pose !== 5) arm(ctx, 5, sh + 7, 12, sh + 27, 22, sh + 31 + Math.sin(t * 1.7) * 1.5, 1);
+    ctx.restore();
+  }
+  function bottle(ctx, x, y, col, big) {
+    var w = big ? 11 : 9, h = big ? 21 : 16;
+    rr(ctx, x - w / 2, y - h, w, h, 3); ctx.fillStyle = col; ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,.55)'; ctx.fillRect(x - w / 2 + 1, y - h + 1, w - 2, h * 0.28);
+    rr(ctx, x - w / 2, y - h, w, h, 3); ctx.strokeStyle = INK; ctx.lineWidth = 2; ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,255,255,.85)'; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.moveTo(x - w / 2 + 2.4, y - h * 0.6); ctx.lineTo(x - w / 2 + 2.4, y - 4); ctx.stroke();
+    box(ctx, x - 2.4, y - h - 6, 4.8, 7, 1.5, 'rgba(255,255,255,.9)');
+    if (big) star(ctx, x, y - h - 9, 5, '#ffd83d');
+    else box(ctx, x - 3, y - h - 9, 6, 4, 1.5, '#d9a273');
+  }
+  /** the trunk itself (behind Dex): wheels, leather, the open display of glowing bottles, the striped awning */
+  function trunkBody(ctx, env, st) {
+    var t = env.t, red = env.reduced, offers = dex.offers, n = offers.length, act = st && st.boosts, i, o, bx, r, a, g;
+    ctx.fillStyle = INK; ctx.beginPath(); ctx.arc(-21, -7, 7.5, 0, TAU); ctx.moveTo(28.5, -7); ctx.arc(21, -7, 7.5, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#c9cde6'; ctx.beginPath(); ctx.arc(-21, -7, 2.6, 0, TAU); ctx.moveTo(23.6, -7); ctx.arc(21, -7, 2.6, 0, TAU); ctx.fill();
+    box(ctx, -34, -88, 68, 76, 7, DEX.trunk);
+    box(ctx, -27, -81, 54, 41, 5, DEX.velvet);
+    box(ctx, -24, -36, 48, 18, 4, DEX.drawer);
+    box(ctx, -8, -30, 16, 5, 2.5, DEX.gold);
+    for (i = 0; i < 4; i++) box(ctx, (i & 1 ? 25 : -34), (i & 2 ? -21 : -88), 9, 9, 2.5, DEX.gold);
+    // glows first, added light on the dark velvet; then the bottles
+    if (n) {
+      ctx.globalCompositeOperation = 'lighter';
+      for (i = 0; i < n; i++) {
+        o = offers[i] || {};
+        if (o.kind === 'limited' && o.sold) continue;
+        bx = -24 + 48 * (i + 0.5) / n; g = glowT[o.id] || 0;
+        a = act && act.indexOf(o.id) >= 0 ? 0.95 : red ? 0.55 : 0.5 + 0.22 * Math.sin(t * 3 + i * 1.7);
+        r = (o.kind === 'limited' ? 17 : 13) * (1 + (act && act.indexOf(o.id) >= 0 ? 0.25 : 0) + (g > 0 ? 0.9 * g / 1.6 * (red ? 0.6 : 1 + 0.25 * Math.sin(t * 18)) : 0));
+        ctx.globalAlpha = Math.min(1, a + g); ctx.drawImage(glowOf(dex.cols[i]), bx - r, -54 - r, 2 * r, 2 * r);
+      }
+      ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
+      for (i = 0; i < n; i++) {
+        o = offers[i] || {};
+        if (o.kind === 'limited' && o.sold) continue;
+        bx = -24 + 48 * (i + 0.5) / n;
+        bottle(ctx, bx, -44, dex.cols[i], o.kind === 'limited');
+        if (act && act.indexOf(o.id) >= 0) {               // yours today: a gold twinkle over the bottle
+          ctx.fillStyle = '#ffe14d'; ctx.beginPath(); ctx.moveTo(bx, -81); ctx.quadraticCurveTo(bx + 1, -76, bx + 5, -75); ctx.quadraticCurveTo(bx + 1, -74, bx, -69);
+          ctx.quadraticCurveTo(bx - 1, -74, bx - 5, -75); ctx.quadraticCurveTo(bx - 1, -76, bx, -81); ctx.fill();
+        }
+      }
+    }
+    box(ctx, -29, -47, 58, 5, 2, '#e8b04a');                 // the shelf
+    // awning
+    for (i = 0; i < 6; i++) {
+      bx = -38 + i * 76 / 6;
+      ctx.beginPath(); ctx.moveTo(bx, -106); ctx.lineTo(bx + 76 / 6, -106); ctx.lineTo(bx + 76 / 6, -93); ctx.arc(bx + 38 / 6, -93, 38 / 6, 0, Math.PI); ctx.closePath();
+      ctx.fillStyle = i & 1 ? '#ffe14d' : '#7a5cff'; ctx.fill(); ctx.strokeStyle = INK; ctx.lineWidth = 2.5; ctx.stroke();
+    }
+    box(ctx, -40, -110, 80, 6, 3, '#7a5cff');
+    if (dex.sold) {
+      ctx.save(); ctx.translate(0, -62); ctx.rotate(-0.16); box(ctx, -34, -10, 68, 20, 5, '#ff6257');
+      ctx.font = '15px "Bagel Fat One", "Arial Rounded MT Bold", system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#ffffff'; ctx.fillText('SOLD OUT', 0, 1, 60); ctx.restore();
+    }
+    if (dealT > 0) {                                       // the trunk lights up when you buy
+      a = Math.pow(dealT / 1.5, 2) * (red ? 0.3 : 0.75);
+      rr(ctx, -34, -88, 68, 76, 7); ctx.fillStyle = 'rgba(255,250,214,' + a.toFixed(3) + ')'; ctx.fill();
+    }
+  }
+  /** the hanging DEX'S DEALS sign and the LIMITED starburst, drawn over Dex, the passers-by and their bubbles so they always read.
+      pole = true draws only the pole it hangs from (behind Dex, with the trunk); it stays on screen */
+  function trunkTop(ctx, env, p, pole) {
+    var t = env.t, red = env.reduced, dx = p.dx, tight = p.lift > 0, hw = tight ? 25 : 40, hh = tight ? 31 : 22, sy = -116 - p.lift, top = sy - hh, i, r, k, sc, a, n;
+    var px = Math.min(30, (p.edge - p.tx) / p.s - 4);
+    ctx.lineCap = 'round';
+    if (pole) {
+      ctx.strokeStyle = INK; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(px, -110); ctx.lineTo(px, top - 7); ctx.lineTo(Math.min(px, dx - hw + 10), top - 7); ctx.stroke();
+      ctx.strokeStyle = '#8a8fb5'; ctx.lineWidth = 2.5; ctx.stroke();
+      return;
+    }
+    ctx.strokeStyle = INK; ctx.lineWidth = 1.8; ctx.beginPath(); ctx.moveTo(dx - hw + 14, top - 7); ctx.lineTo(dx - hw + 14, top); ctx.moveTo(dx + hw - 14, top - 7); ctx.lineTo(dx + hw - 14, top); ctx.stroke();
+    box(ctx, dx - hw, top, hw * 2, hh, 7, '#3b2a7a');
+    k = red ? 0 : Math.floor(t * 5); n = tight ? 5 : 8;
+    for (i = 0; i < n; i++) {                               // marquee bulbs chase along the edges
+      ctx.fillStyle = (i + k) % 2 ? '#fff4b8' : '#ff8fb3';
+      ctx.beginPath(); ctx.arc(dx - hw + 8 + i * (hw * 2 - 16) / (n - 1), top + 2.5, 1.9, 0, TAU); ctx.arc(dx - hw + 8 + i * (hw * 2 - 16) / (n - 1), sy - 2.5, 1.9, 0, TAU); ctx.fill();
+    }
+    ctx.font = '12px "Bagel Fat One", "Arial Rounded MT Bold", system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#ffd83d';
+    if (tight) { ctx.fillText('DEX\'S', dx, top + 10.5, 42); ctx.fillText('DEALS', dx, top + 21.5, 42); }
+    else ctx.fillText('DEX\'S DEALS', dx, top + 11.5, 66);
+    if (dex.lim && !dex.sold) {                            // a limited flavour is still for sale
+      sc = red || (limT <= 0 && !(env.dt > 0)) ? 1 : SS.ease.outBack(SS.clamp(limT / 0.4, 0, 1));   // frozen frames show it fully popped
+      if (!red) sc *= 1 + 0.07 * Math.sin(t * 5);
+      if (tight) sc *= 0.8;
+      ctx.save(); ctx.translate(dx + (tight ? 0 : 10), top - (tight ? 21 : 26)); ctx.scale(sc, sc); ctx.rotate(red ? -0.12 : -0.12 + 0.07 * Math.sin(t * 1.7));
+      ctx.beginPath();
+      for (i = 0; i < 32; i++) { a = i * Math.PI / 16; r = i % 2 ? 21 : 28; ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r); }
+      ctx.closePath(); ctx.fillStyle = '#ff6257'; ctx.fill(); ctx.strokeStyle = INK; ctx.lineWidth = 2.5; ctx.stroke();
+      ctx.beginPath(); ctx.arc(0, 0, 17, 0, TAU); ctx.strokeStyle = '#ffd83d'; ctx.lineWidth = 1.6; ctx.stroke();
+      ctx.font = '900 10.5px Figtree, system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      inkText(ctx, 'LIMITED', 0, 0.5, '#ffffff', 3);
+      ctx.restore();
+    }
+  }
+  function drawDealer(ctx, view, env, st) {
+    var p = spot, s = p.s, t = env.t, red = env.reduced, T = 7.2, ph = ((t % T) + T) % T, pose = 0, k = 0, face = -1, hop = 0, e, u;
+    shadow(ctx, p.tx, p.y + s, 44, s);
+    ctx.save(); ctx.translate(p.tx, p.y); ctx.scale(s, s); trunkBody(ctx, env, st); trunkTop(ctx, env, p, true); ctx.restore();
+    if (dex.sold) pose = 5;                                 // nothing left to sell: he kicks back
+    else if (ph < 1.4) { pose = 1; k = ph / 1.4; }
+    else if (ph >= 3 && ph < 4.1) { pose = 2; k = (ph - 3) / 1.1; }
+    else if (ph >= 5.5 && ph < 6.7) { pose = 3; k = (ph - 5.5) / 1.2; face = -1 + 2 * SS.smooth(Math.min(k, 1 - k) / 0.12); }
+    if (lookT > 0 && SS.state && SS.state.phase === 'day') { pose = 6; k = 1 - lookT / 1.3; face = -1; }   // a sale: he turns to the customer
+    if (dealT > 0) {                                        // you bought something: a spin, then two thumbs up
+      e = 1 - dealT / 1.5; pose = 4; k = e; face = -1;
+      if (!red && e < 0.34) { u = e / 0.34; face = -Math.cos(u * TAU); hop = Math.sin(u * Math.PI) * 14; pose = 0; }
+    }
+    if (Math.abs(face) < 0.08) face = face < 0 ? -0.08 : 0.08;
+    shadow(ctx, p.x, p.y, 24, s * (1 - hop / 50));
+    ctx.save(); ctx.translate(p.x, p.y - hop * s); ctx.scale(s * face, s); dexRig(ctx, env, pose, k); ctx.restore();
+  }
+
   SS.Actors = {
-    update: function (dt) { tapT = Math.max(0, tapT - dt); bellT = Math.max(0, bellT - dt); cheerT = Math.max(0, cheerT - dt); },
+    update: function (dt) {
+      tapT = Math.max(0, tapT - dt); bellT = Math.max(0, bellT - dt); cheerT = Math.max(0, cheerT - dt);
+      dealT = Math.max(0, dealT - dt); lookT = Math.max(0, lookT - dt); lookCD -= dt; limT = dex.on && dex.lim ? limT + dt : 0;
+      for (var id in glowT) if (glowT[id] > 0) glowT[id] = Math.max(0, glowT[id] - dt);
+    },
     draw: function (ctx, view, env) {
       var st = SS.state, today = st && st.today, list = today && today.customers ? today.customers.slice() : [];
-      var fl = DATA.byId(DATA.flavors, (st && st.flavor) || 'classic') || DATA.flavors[0];
+      var fl = DATA.byId(DATA.flavors, (st && st.flavor) || 'classic') || DATA.flavors[0], on = dexOn(st), dl = 1e9, n = list.length, i = 0;
       list.sort(function (a, b) { return a.lane - b.lane; });
-      var i = 0;
-      for (; i < list.length && list[i].lane < W.STAND_LANE; i++) drawCustomer(ctx, view, env, list[i], fl.color);
-      drawStand(ctx, view, env, st);
-      for (; i < list.length; i++) drawCustomer(ctx, view, env, list[i], fl.color);
+      if (on) { dexLayout(view); dl = (spot.x - 26 * spot.s - view.toX(W.STAND_X)) / view.laneScale(W.STAND_LANE); }
+      for (; i < n && list[i].lane < W.STAND_LANE; i++) drawCustomer(ctx, view, env, list[i], fl.color);
+      drawStand(ctx, view, env, st, dl);
+      for (; i < n && list[i].lane < W.DEALER_LANE; i++) drawCustomer(ctx, view, env, list[i], fl.color);
+      if (on) drawDealer(ctx, view, env, st);
+      for (; i < n; i++) drawCustomer(ctx, view, env, list[i], fl.color);
       if (today && today.tips && today.tips.length) drawTips(ctx, view, env, today.tips);
+      lineMarks(view, list, today, st);
+      for (i = 0; i < n; i++) drawOverhead(ctx, view, env, list[i], st, today);
+      if (on) { ctx.save(); ctx.translate(spot.tx, spot.y); ctx.scale(spot.s, spot.s); trunkTop(ctx, env, spot); ctx.restore(); }   // his sign reads over the walkers and their bubbles
     },
-    /** screen-space hit test: tips first (generous), then the stand */
+    /** screen-space hit test: tips first (generous), then Dex and his trunk, then the stand */
     hit: function (sx, sy) {
-      var st = SS.state, today = st && st.today, view = SS.view;
-      if (!today || !view) return null;
-      var tips = today.tips || [];
-      for (var i = 0; i < tips.length; i++) {
+      var st = SS.state, today = st && st.today, view = SS.view, i, p, s;
+      if (!st || !view) return null;
+      var tips = (today && today.tips) || [];
+      for (i = 0; i < tips.length; i++) {
         var t = tips[i], r = Math.max(28, 20 * view.laneScale(t.lane));
         var dx = sx - view.toX(t.x), dy = sy - (view.laneY(t.lane) - 12 * view.laneScale(t.lane));
         if (dx * dx + dy * dy <= r * r) return { type: 'tip', id: t.id };
       }
-      var s = view.laneScale(W.STAND_LANE), x = view.toX(W.STAND_X), y = view.laneY(W.STAND_LANE);
+      if (dexOn(st)) {
+        p = dexLayout(view); s = p.s;
+        if (sx >= Math.min(p.x - 34 * s, p.tx + (p.dx - 46) * s) && sx <= Math.max(p.x + 30 * s, p.tx + 46 * s) &&
+          sy <= p.y + 14 && sy >= p.y - (150 + p.lift + (dex.lim && !dex.sold ? 48 : 0)) * s) return { type: 'dealer' };
+      }
+      if (!today) return null;
+      s = view.laneScale(W.STAND_LANE); var x = view.toX(W.STAND_X), y = view.laneY(W.STAND_LANE);
       if (Math.abs(sx - x) <= 104 * s && sy <= y + 6 && sy >= y - 220 * s) return { type: 'stand' };
       return null;
+    },
+    /** Dex's feet and height in screen px (tx, ty: his trunk), or null when he is not around */
+    dealerPos: function () {
+      var view = SS.view;
+      if (!view || !view.toX || !dexOn(SS.state)) return null;
+      var p = dexLayout(view);
+      return { x: p.x, y: p.y, h: 120 * p.s, tx: p.tx, ty: p.y - 60 * p.s };
     }
   };
 })();

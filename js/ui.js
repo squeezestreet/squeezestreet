@@ -78,7 +78,8 @@
     hud.clockText = h('b', { class: 'hud-clock-text num' }, SS.clockText(0));
     hud.track = h('div', { class: 'hud-clock-track', 'aria-hidden': 'true' }, h('i', { class: 'hud-clock-fill' }), h('i', { class: 'hud-clock-sun' }));
     hud.clock = h('div', { class: 'hud-bar hud-clock', hidden: true }, h('span', { class: 'hud-sr' }, 'Time '), hud.clockText, hud.track);
-    hud.sub = h('div', { class: 'hud-sub' }, h('div', { class: 'hud-bar hud-ctx' }, hud.loc, hud.wx), hud.clock);
+    hud.subBoosts = h('span', { class: 'hud-sub-boosts', 'aria-hidden': 'true' });       // today's boosts, on narrow phones only
+    hud.sub = h('div', { class: 'hud-sub' }, h('div', { class: 'hud-bar hud-ctx' }, hud.loc, hud.wx), hud.clock, hud.subBoosts);
 
     hud.repStars = h('span', { class: 'hud-rep-full', html: SS.starsHTML(0) });
     hud.repOn = hud.repStars.querySelector('.stars-on');
@@ -89,6 +90,11 @@
     hud.cashSeg = h('div', { class: 'hud-seg hud-cash', title: 'Cash' }, ico('coin'), h('span', { class: 'hud-sr' }, 'Cash '), hud.cash);
     hud.stats = h('div', { class: 'hud-bar hud-stats' }, hud.rep, hud.cashSeg);
 
+    // Dex's deals during the day: his face, today's boosts as a little stack, a dot while a limited edition is in
+    hud.dealsStack = h('span', { class: 'hud-deals-stack', 'aria-hidden': 'true' });
+    hud.deals = btn('hud-bar hud-deals', [h('span', { class: 'hud-deals-face' }, ico('dealer')), hud.dealsStack, h('i', { class: 'hud-deals-dot', 'aria-hidden': 'true' })],
+      function () { openScreen('dealer'); }, { hidden: true });
+
     hud.snd = btn('btn btn--icon', null, toggleSound);
     hud.btns = h('div', { class: 'hud-btns' },
       btn('btn btn--icon', ico('trophy'), function () { openScreen('goals'); }, { 'aria-label': 'Goals', title: 'Goals' }),
@@ -97,7 +103,36 @@
     hud.menuBtn = btn('btn btn--icon hud-menu-btn', ico('menu'), function () { toggleMenu(); },
       { 'aria-label': 'Menu', 'aria-haspopup': 'true', 'aria-expanded': 'false' });
     hud.menu = h('div', { class: 'hud-menu panel', role: 'menu', hidden: true });
-    R.hud.replaceChildren(hud.day, hud.sub, hud.stats, hud.btns, hud.menuBtn, hud.menu);
+    R.hud.replaceChildren(hud.day, hud.sub, hud.deals, hud.stats, hud.btns, hud.menuBtn, hud.menu);
+  }
+
+  /** Show the deals button while Dex is open for business during the day. Cheap: runs on events, not per frame. */
+  function refreshDeals() {
+    if (!hud.deals) return;
+    var s = SS.state, info = s && s.phase === 'day' ? sim('dealerInfo') : null;
+    var show = !!(info && info.present && Array.isArray(info.offers));
+    hud.deals.hidden = !show;
+    R.hud.classList.toggle('has-deals', show);
+    if (!show) { if (hud.dealsKey) { hud.dealsKey = null; hud.dealsStack.replaceChildren(); hud.subBoosts.replaceChildren(); } return; }
+    var act = (info.active || []).filter(function (id) { return D.boosts && D.byId(D.boosts, id); }), key = act.join(',');
+    var lim = info.offers.some(function (o) { return o.kind === 'limited' && !o.sold; });
+    if (hud.dealsKey !== key) {
+      var grew = hud.dealsKey != null && key.length > hud.dealsKey.length;
+      hud.dealsKey = key;
+      var dots = act.slice(0, 3).map(function (id, i) {
+        var b = D.byId(D.boosts, id);
+        return h('span', { class: 'hud-deals-boost' + (grew && i === Math.min(act.length, 3) - 1 ? ' is-new' : ''), style: '--bc:' + b.color }, ico(b.icon));
+      });
+      if (act.length > 3) dots.push(h('span', { class: 'hud-deals-more num' }, '+' + (act.length - 3)));
+      hud.dealsStack.replaceChildren.apply(hud.dealsStack, dots);
+      hud.subBoosts.replaceChildren.apply(hud.subBoosts, dots.map(function (d) { return d.cloneNode(true); }));
+    }
+    hud.deals.classList.toggle('has-boosts', act.length > 0);
+    hud.deals.classList.toggle('has-limited', lim);
+    var names = act.map(function (id) { return D.byId(D.boosts, id).name; });
+    var label = 'Dex\'s deals' + (names.length ? '. Active today: ' + names.join(', ') : '') + (lim ? '. A limited edition is in today' : '');
+    hud.deals.setAttribute('aria-label', label);
+    hud.deals.title = label;
   }
 
   function onLoc() {
@@ -412,6 +447,9 @@
     var open = layers.length > 0, inDay = !!SS.state && SS.state.phase === 'day';
     if (open && !pausedByModal && inDay) { pausedByModal = true; prevPaused = SS.paused; SS.setPaused(true); }
     else if (!open && pausedByModal) { pausedByModal = false; if (inDay) SS.setPaused(prevPaused); }
+    layoutToasts();
+    if (R.banner) R.banner.classList.toggle('is-held', open);      // news waits until the modal closes
+    if (!open) pumpBanners();
   }
   function openLayer(o) {
     if (!inited) init();
@@ -541,6 +579,7 @@
     ['sun', 'Watch the weather', 'Hot days bring thirsty crowds who want extra ice. Rain keeps people home, so buy less. The forecast is usually right, not always.'],
     ['bell', 'Work the stand', 'Ring the bell to call people over, tap the stand to mix a batch faster, and tap coins on the ground to pick up tips.'],
     ['newspaper', 'Read the reviews', 'Customers say what bothered them: too sour, too sweet, too warm, too pricey or too slow. Fix that one thing tomorrow.'],
+    ['regular', 'Regulars and Dex', 'Make someone really happy and they may come back as a regular. Every happy visit in a row, they pay a little more. Dex the Dealer sells boosts that last one day, and sometimes a flavor you can\'t get anywhere else.'],
     ['juicer', 'Upgrade', 'Spend your profit on a bigger pitcher, a faster juicer, shade, signs and new flavors.'],
     ['map', 'Move up', 'More stars unlock busier spots, from the park to the carnival. The rent is higher and so are the takings.']
   ];
@@ -604,12 +643,16 @@
     }
     t.timer = setTimeout(function () { dropToast(t); }, ms);
   }
+  /** above the day bar; over the top of an open modal, so a toast never hides what the player is tapping */
   function layoutToasts() {
-    if (R.toast) R.toast.style.bottom = phase === 'day' && !R.daybar.hidden ? (R.daybar.offsetHeight + 72) + 'px' : '';
+    if (!R.toast) return;
+    var over = layers.length > 0;
+    R.toast.classList.toggle('is-over-modal', over);
+    R.toast.style.bottom = !over && phase === 'day' && !R.daybar.hidden ? (R.daybar.offsetHeight + 72) + 'px' : '';
   }
 
   /* ------------------------------------------------------------------ *
-   * Banners: at most two on screen, the rest wait their turn
+   * Banners: one on screen at a time, the rest wait their turn (and wait for open modals)
    * ------------------------------------------------------------------ */
   var bannerQ = [], bannersLive = 0, bannerGen = 0;
   function banner(o) {
@@ -619,7 +662,7 @@
     pumpBanners();
   }
   function pumpBanners() {
-    while (bannersLive < 2 && bannerQ.length) showBanner(bannerQ.shift());
+    while (bannersLive < 1 && bannerQ.length && !layers.length) showBanner(bannerQ.shift());
   }
   function showBanner(o) {
     var gen = bannerGen, ms = bannerQ.length > 1 ? 2200 : o.goal ? 4200 : 3400;
@@ -629,7 +672,8 @@
         o.label ? h('span', { class: 'label' }, o.label) : null,
         h('b', { class: 'banner-title' + (o.goal ? ' display' : '') }, o.title),
         o.desc ? h('span', { class: 'banner-desc' }, o.desc) : null),
-      o.reward > 0 ? h('span', { class: 'banner-reward display num' }, '+' + SS.fmtMoney(o.reward)) : null);
+      o.reward > 0 ? h('span', { class: 'banner-reward display num' }, '+' + SS.fmtMoney(o.reward)) : null,
+      o.pill ? h('span', { class: 'banner-reward banner-pill display num' }, o.pill) : null);
     bannersLive++;
     R.banner.append(el);
     setTimeout(function () {
@@ -675,6 +719,39 @@
     banner({ icon: 'trophy', label: 'Goal complete', title: p.title || 'Nicely done', reward: Number(p.reward) || 0, kind: 'goal', goal: true });
   }
 
+  /* Regulars and Dex the Dealer */
+  function regName(r) { return (r && r.name) || 'A regular'; }
+  function onRegNew(p) {
+    var r = p && p.regular, k = r && D.kinds[r.kind];
+    banner({ icon: 'regular', label: 'New regular', title: regName(r) + (k ? ' the ' + k.name : ''), desc: 'Keep them happy and they pay a little extra every visit.', kind: 'regular' });
+  }
+  function onRegLost(p) {
+    banner({ icon: 'faceSad', label: 'Regular lost', title: regName(p && p.regular) + ' stopped coming', desc: 'Two bad visits in a row.', kind: 'bad' });
+  }
+  function onRegStreak(p) {
+    var n = p && Math.floor(Number(p.streak) || 0);
+    if (!n || n % 5 || n > 20) return;                         // 5, 10, 15 and 20 only
+    banner({ icon: 'flame', label: 'Streak', title: regName(p.regular) + ': ' + n + ' visits in a row!', pill: SS.fmtMult(p.mult || SS.loyaltyMult(n)), kind: 'streak' });
+  }
+  function onDeal(p) {
+    if (!p || layers.length) return;                         // bought in Dex's screen: the card itself says so
+    var b = D.boosts && D.byId(D.boosts, p.id), f = D.byId(D.flavors, p.id);
+    if (p.kind === 'limited' && f) toast(f.name + ' is yours to keep', 'good', 'drink');
+    else if (b) toast(b.name + ' is on for today', 'good', b.icon);
+  }
+  var dexBannerDay = 0;
+  /** once a morning: tell the player Dex has something they cannot buy anywhere else */
+  function dexMorning() {
+    var s = SS.state;
+    if (!s || phase !== 'prep' || dexBannerDay === s.day) return;
+    var info = sim('dealerInfo'), lim = null;
+    if (!info || !info.present || !Array.isArray(info.offers)) return;
+    info.offers.forEach(function (o) { if (o.kind === 'limited' && !o.sold) lim = o; });
+    if (!lim) return;
+    dexBannerDay = s.day;
+    banner({ icon: 'dealer', label: 'Dex has a limited edition today', title: lim.name, desc: 'Only from Dex. Tap Deals to see it.', kind: 'dex' });
+  }
+
   /* ------------------------------------------------------------------ *
    * Coach tips for a first-time player
    * ------------------------------------------------------------------ */
@@ -693,6 +770,9 @@
       { at: 'next', text: 'Read the reviews first: they tell you what to fix tomorrow. Then head into the next day.' }
     ]
   };
+  var DEX_TIP = [
+    { at: 'deals', once: 'dex', text: 'This is Dex. He sells boosts that last one day, and sometimes a limited-edition flavor you can\'t get anywhere else.' }
+  ];
   var coach = { phase: '', steps: null, i: 0, tries: 0, timer: 0, el: null, ring: null, node: null, bw: 0, bh: 0, side: '', x: 0, y: 0, ax: 0, ay: 0, l: 0, t: 0, w: 0, h: 0 };
 
   function tutDrop() {
@@ -705,26 +785,40 @@
     tutDrop();
     coach.steps = null; coach.phase = '';
   }
+  /** a one-time tip (step.once names its flag in state.tutorial) is remembered once seen or skipped */
+  function tutMarkOnce() {
+    var s = SS.state, step = coach.steps && coach.steps[coach.i];
+    if (step && step.once && s && s.tutorial && !s.tutorial[step.once]) { s.tutorial[step.once] = true; sim('save'); }
+  }
   function tutFinish() {
     var s = SS.state;
+    tutMarkOnce();
     if (s && s.tutorial && !s.tutorial.done) { s.tutorial.done = true; sim('save'); }
     tutClear();
   }
+  function dexHere() { var i = sim('dealerInfo'); return !!(i && i.present); }
   function tutStart(ph) {
-    var s = SS.state;
-    if (!s || !s.tutorial || s.tutorial.done || !TIPS[ph]) { tutClear(); return; }
-    if (ph === 'prep' && s.day > 1) { tutFinish(); return; }           // they have been round once: lesson over
+    var s = SS.state, t = s && s.tutorial;
+    if (t && !t.done && ph === 'prep' && s.day > 1) tutFinish();      // they have been round once: lesson over
+    if (!t || t.done || !TIPS[ph]) {
+      if (ph === 'prep' && t && !t.dex && dexHere()) tutBegin(ph, DEX_TIP, 1100);   // the first morning Dex turns up
+      else tutClear();
+      return;
+    }
+    tutBegin(ph, TIPS[ph], ph === 'day' ? 1300 : 700);
+  }
+  function tutBegin(ph, steps, ms) {
     if (coach.phase === ph && coach.steps) return;
     tutClear();
-    coach.phase = ph; coach.steps = TIPS[ph]; coach.i = 0; coach.tries = 0;
-    coach.timer = setTimeout(tutStep, ph === 'day' ? 1300 : 700);
+    coach.phase = ph; coach.steps = steps; coach.i = 0; coach.tries = 0;
+    coach.timer = setTimeout(tutStep, ms);
   }
   function tutAnchor(name) {
     if (name === 'stand') return SS.view && SS.view.w > 1 && phase === 'day' ? 'stand' : null;
     var el = document.querySelector('[data-tut="' + name + '"]');
     return el && el.getClientRects().length ? el : null;
   }
-  function tutNext() { coach.i++; coach.tries = 0; tutStep(); }
+  function tutNext() { tutMarkOnce(); coach.i++; coach.tries = 0; tutStep(); }
   function tutStep() {
     clearTimeout(coach.timer);
     tutDrop();
@@ -765,7 +859,7 @@
     var hide = layers.length > 0 || (pause.el && !pause.el.hidden);
     if (R.coach.hidden !== hide) R.coach.hidden = hide;
     if (hide || !coach.el) return;
-    var node = coach.node, W = R.coach.clientWidth, H = R.coach.clientHeight, l, t, w, ht;
+    var node = coach.node, W = R.coach.clientWidth, H = R.coach.clientHeight, l, t, w, ht, bar = null;
     if (node === 'stand') {
       var v = SS.view, G = SS.W;
       if (!v || phase !== 'day') { tutNext(); return; }
@@ -773,24 +867,27 @@
       l = v.toX(G.STAND_X) - w / 2; t = v.laneY(G.STAND_LANE) - ht;
     } else {
       if (!node.isConnected || !node.getClientRects().length) { tutStep(); return; }
-      var r = node.getBoundingClientRect(), o = R.coach.getBoundingClientRect();
+      var r = node.getBoundingClientRect(), o = R.coach.getBoundingClientRect(), f = node.closest('.prep-foot, .res-foot');
       l = r.left - o.left; t = r.top - o.top; w = r.width; ht = r.height;
+      if (f) { f = f.getBoundingClientRect(); bar = { l: f.left - o.left, t: f.top - o.top, w: f.width, h: f.height }; }
     }
     if (!coach.bw) { coach.bw = coach.el.offsetWidth; coach.bh = coach.el.offsetHeight; }
     var bw = coach.bw, bh = coach.bh, gap = 18, m = 8, top0 = R.hud.hidden ? m : W <= 520 ? 76 : 66;
     var side, x, y, cy = t + Math.min(ht / 2, 70);
-    if (w < W * 0.6 && l > W * 0.4 && l - gap - m >= bw) side = 'left';
-    else if (t - top0 - gap >= bh) side = 'top';
-    else if (H - (t + ht) - gap - m >= bh) side = 'bottom';
-    else if (l - gap - m >= bw) side = 'left';
-    else if (W - (l + w) - gap - m >= bw) side = 'right';
+    // an anchor in a bottom action bar: keep the whole bar clear (its other buttons and the reason line)
+    var k = bar || { l: l, t: t, w: w, h: ht };
+    if (k.w < W * 0.6 && k.l > W * 0.4 && k.l - gap - m >= bw) side = 'left';
+    else if (k.t - top0 - gap >= bh) side = 'top';
+    else if (H - (k.t + k.h) - gap - m >= bh) side = 'bottom';
+    else if (k.l - gap - m >= bw) side = 'left';
+    else if (W - (k.l + k.w) - gap - m >= bw) side = 'right';
     else side = 'over';
     if (side === 'left' || side === 'right') {
-      x = side === 'left' ? l - gap - bw : l + w + gap;
+      x = side === 'left' ? k.l - gap - bw : k.l + k.w + gap;
       y = clamp(cy - bh / 2, top0, Math.max(top0, H - bh - m));
     } else {
       x = clamp(l + w / 2 - bw / 2, m, Math.max(m, W - bw - m));
-      y = side === 'top' ? t - gap - bh : side === 'bottom' ? t + ht + gap : top0 + 4;
+      y = side === 'top' ? k.t - gap - bh : side === 'bottom' ? k.t + k.h + gap : top0 + 4;
     }
     x = Math.round(x); y = Math.round(y); l = Math.round(l); t = Math.round(t); w = Math.round(w); ht = Math.round(ht);
     var ax = Math.round(clamp(l + w / 2 - x, 22, bw - 22)), ay = Math.round(clamp(cy - y, 22, bh - 22));
@@ -876,11 +973,13 @@
     R.hud.hidden = to === 'title';
     R.daybar.hidden = to !== 'day';
     if (pause.el) pause.el.hidden = true;
-    if (to === 'title') clearBanners();
+    if (to === 'title' || (p && p.from === 'results')) clearBanners();   // the results screen already listed what they said
     if (to === 'day') resetDay();
     refreshHud();
+    refreshDeals();
     layoutToasts();
     tutStart(to);
+    if (to === 'prep') setTimeout(dexMorning, 650);          // after the morning news, which lands right after the phase
   }
 
   function frame() {
@@ -915,6 +1014,13 @@
     SS.on('location:unlock', onUnlock);
     SS.on('upgrade:buy', onUpgrade);
     SS.on('milestone', onMilestone);
+    SS.on('regular:new', onRegNew);
+    SS.on('regular:lost', onRegLost);
+    SS.on('regular:streak', onRegStreak);
+    SS.on('dealer:buy', function (p) { onDeal(p); refreshDeals(); });
+    SS.on('boost:on', refreshDeals);
+    SS.on('day:start', refreshDeals);
+    SS.on('ui:open', function (p) { if (p && p.name === 'dealer' && tutOn('deals')) tutNext(); });
     SS.on('win', function () { setTimeout(openWin, 1100); });
     SS.on('brew:start', function (p) {
       var sp = (SS.state && SS.state.settings && SS.state.settings.speed) || 1;

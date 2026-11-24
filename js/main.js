@@ -34,17 +34,21 @@
     var p = scenePoint(e);
     try { return SS.Actors.hit(p.x, p.y); } catch (err) { return null; }
   }
+  /* Dex the Dealer takes taps in the morning too; tips and the stand only while open. */
+  function sceneLive(st) { return !!st && (st.phase === 'day' || st.phase === 'prep') && !SS.paused && !document.querySelector('#modal-root > *'); }
   function onScenePress(e) {
     var st = SS.state;
-    if (!st || st.phase !== 'day' || SS.paused || !SS.Sim) return;
+    if (!sceneLive(st) || !SS.Sim) return;
     var hit = hitAt(e);
     if (!hit) return;
-    if (hit.type === 'tip') SS.Sim.collectTip(hit.id);
+    if (hit.type === 'dealer') { if (SS.Screens && SS.Screens.open) SS.Screens.open('dealer'); }
+    else if (st.phase !== 'day') return;
+    else if (hit.type === 'tip') SS.Sim.collectTip(hit.id);
     else if (hit.type === 'stand') SS.Sim.tapStand();
   }
   function onSceneMove(e) {
-    var st = SS.state, hit = st && st.phase === 'day' && !SS.paused ? hitAt(e) : null;
-    e.currentTarget.style.cursor = hit ? 'pointer' : '';
+    var st = SS.state, hit = sceneLive(st) ? hitAt(e) : null;
+    e.currentTarget.style.cursor = hit && (st.phase === 'day' || hit.type === 'dealer') ? 'pointer' : '';
   }
 
   /* Keyboard: Space/P pause, 1-3 speed, B bell, M mute. Ignored while typing or on a control. */

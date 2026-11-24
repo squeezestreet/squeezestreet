@@ -7,6 +7,7 @@
  *   play(name, opts)    one-shot effect. opts: { pitch, gain, delay, duration, qty, kind }. Unknown names do nothing.
  *                       names: click tick open close error tally whoosh coin tip ting pour squeeze squish ding bell
  *                              pop hm grumble chirp low trombone fanfare win chaching jingle chime thunder spend blip
+ *                              welcome streak crack shield farewell loyal powerup
  * }
  * Listens to the bus by itself (sales, bells, weather, phases, settings, pause) and runs the
  * generative music and the location / weather ambience on a lookahead scheduler.
@@ -280,12 +281,54 @@
       if (o.kind === 'bad') tone(m, d, 'sine', 520 * v, t, 0.14, 0.2, { to: 430 * v });
       else tone(m, d, 'sine', 698 * v, t, 0.1, 0.2, { to: 880 * v });
       if (o.kind === 'good') tone(m, d, 'sine', 1047 * v, t + 0.08, 0.14, 0.16);
+    },
+    welcome: function (m, d, t, v) {                    // a new regular: warm two-note chime, a fourth up
+      bell(m, d, t, 784 * v, 0.9, 0.2);
+      bell(m, d, t + 0.14, 1047 * v, 1.3, 0.24);
+      tone(m, d, 'triangle', 392 * v, t, 0.5, 0.1, { a: 0.02 });
+      tone(m, d, 'triangle', 523 * v, t + 0.14, 0.8, 0.1, { a: 0.02 });
+    },
+    streak: function (m, d, t, v, o) {                  // rising arpeggio; the top note climbs with the streak
+      var n = clamp(Math.floor(o.streak) || 1, 1, 20), top = Math.min(11, 3 + n), i, j, f;
+      for (i = 0; i < 4; i++) {
+        j = top - 3 + i; f = mtof(KEY + 12 + 12 * Math.floor(j / 5) + PENTA[j % 5]) * v;
+        pluck(m, d, f, t + i * 0.065, i === 3 ? 0.6 : 0.2, i === 3 ? 0.24 : 0.18);
+      }
+      bell(m, d, t + 0.195, f * 2, 0.5, 0.06);
+      if (n === 5 || n === 10 || n === 20) sparkle(m, d, t + 0.25, n >= 10 ? 8 : 5, 0.5);
+    },
+    crack: function (m, d, t, v) {                      // a streak broke: short descending blip with a snap
+      tone(m, d, 'triangle', 660 * v, t, 0.09, 0.26, { to: 560 * v });
+      tone(m, d, 'triangle', 494 * v, t + 0.09, 0.22, 0.26, { to: 370 * v });
+      hiss(m, d, 'bandpass', 2600, t + 0.085, 0.04, 0.16, { q: 2.5 });
+    },
+    shield: function (m, d, t, v) {                     // the Streak Shield saved it: bright ping
+      bell(m, d, t, 1760 * v, 0.8, 0.2, METAL);
+      tone(m, d, 'sine', 2637 * v, t + 0.04, 0.5, 0.07, { vib: [7, 14] });
+      hiss(m, d, 'highpass', 6000, t, 0.25, 0.05, { a: 0.01 });
+    },
+    farewell: function (m, d, t, v) {                   // a regular stopped coming: soft low tone
+      tone(m, d, 'sine', 247 * v, t, 0.9, 0.22, { to: 196 * v, a: 0.08 });
+      tone(m, d, 'triangle', 123.5 * v, t, 0.9, 0.08, { a: 0.1 });
+    },
+    loyal: function (m, d, t, v) {                      // loyalty bonus: a brighter, sparklier coin than a sale
+      var f = 1175 * v;
+      tone(m, d, 'triangle', f, t, 0.07, 0.18);
+      tone(m, d, 'triangle', f * 1.498, t + 0.06, 0.35, 0.2);
+      tone(m, d, 'sine', f * 2.997, t + 0.06, 0.2, 0.05);
+      sparkle(m, d, t + 0.1, 4, 0.25, 0.04);
+    },
+    powerup: function (m, d, t, v) {                    // a boost switched on: quick upward sweep
+      tone(m, d, 'square', 220 * v, t, 0.28, 0.1, { to: 1320 * v, glide: 0.24, flt: ['lowpass', 2400, 1] });
+      tone(m, d, 'sine', 440 * v, t, 0.3, 0.16, { to: 1760 * v, glide: 0.26 });
+      hiss(m, d, 'bandpass', 600, t, 0.3, 0.1, { to: 5000, q: 1.5, a: 0.1 });
+      tone(m, d, 'sine', 1760 * v, t + 0.27, 0.25, 0.12);
     }
   };
-  var LEVEL = { pour: 0.7, error: 0.6, bell: 0.7, ding: 0.85, trombone: 0.62, fanfare: 0.7, win: 0.7, chaching: 0.9, chime: 0.75, thunder: 0.75, grumble: 0.8, low: 0.75, hm: 0.6 };                                                                  // per-effect trim, tuned from the offline loudness table
-  var VAR = { trombone: 0, fanfare: 0, win: 0, chaching: 0, jingle: 0, chime: 0, bell: 0, thunder: 0, coin: 0.02, tally: 0.02, pop: 0.14, hm: 0.16, grumble: 0.14 };   // random pitch spread (default 0.05)
-  var GAP = { tick: 0.03, tally: 0.035, pop: 0.09, hm: 0.7, grumble: 0.35, chirp: 0.8, low: 0.8, coin: 0.06, tip: 0.07, ting: 0.1, squish: 0.07, blip: 0.2, whoosh: 0.15, pour: 0.12, spend: 0.15, thunder: 2 };   // min seconds between repeats (default 0.04)
-  var ECHO = { bell: 1, chime: 1, fanfare: 1, win: 1, ding: 1, chaching: 1, jingle: 1, tip: 1, ting: 1 };
+  var LEVEL = { welcome: 0.7, farewell: 0.6, pour: 0.7, error: 0.6, bell: 0.7, ding: 0.85, trombone: 0.62, fanfare: 0.7, win: 0.7, chaching: 0.9, chime: 0.75, thunder: 0.75, grumble: 0.8, low: 0.75, hm: 0.6 };                                                                  // per-effect trim, tuned from the offline loudness table
+  var VAR = { streak: 0, welcome: 0.02, trombone: 0, fanfare: 0, win: 0, chaching: 0, jingle: 0, chime: 0, bell: 0, thunder: 0, coin: 0.02, tally: 0.02, pop: 0.14, hm: 0.16, grumble: 0.14 };   // random pitch spread (default 0.05)
+  var GAP = { tick: 0.03, tally: 0.035, pop: 0.09, hm: 0.7, grumble: 0.35, chirp: 0.8, low: 0.8, coin: 0.06, tip: 0.07, ting: 0.1, squish: 0.07, blip: 0.2, whoosh: 0.15, pour: 0.12, spend: 0.15, thunder: 2, welcome: 0.3, streak: 0.15, crack: 0.25, shield: 0.3, farewell: 0.6, loyal: 0.08, powerup: 0.25 };   // min seconds between repeats (default 0.04)
+  var ECHO = { welcome: 1, streak: 1, shield: 1, bell: 1, chime: 1, fanfare: 1, win: 1, ding: 1, chaching: 1, jingle: 1, tip: 1, ting: 1 };
   var DUCK = { fanfare: 1.3, win: 3.4, jingle: 0.9, chime: 1.1, trombone: 1.5, chaching: 0.5 };   // seconds the music steps back
 
   /** Build one effect at time t. Shared by play() and the offline tests. */
@@ -570,7 +613,7 @@
    * Live engine
    * ------------------------------------------------------------------ */
   var ctx = null, mix = null, mus = null, amb = null;
-  var mood = 'title', lastAt = {}, combo = 0, lastSale = -9, ticks = 0, warned = false;
+  var mood = 'title', lastAt = {}, combo = 0, lastSale = -9, lastDeal = -9, ticks = 0, warned = false;
 
   function levels() {
     if (!mix) return;
@@ -674,7 +717,15 @@
   say('day:start', 'jingle', { delay: 0.25 });          // lets the phase whoosh go first
   say('day:end', 'chime', { delay: 0.1 });
   on('weather:change', function (p) { if (p.type === 'storm') play('thunder'); });
-  on('cash', function (p) { if (p.delta < 0 && !/^(upgrade|location|flavor)$/.test(p.reason)) play('spend'); });   // those already cha-ching
+  on('cash', function (p) { if (p.delta < 0 && !/^(upgrade|location|flavor|dealer|deal|boost|limited)$/.test(p.reason)) play('spend'); });   // those already cha-ching
+  // regulars and Dex the Dealer
+  say('regular:new', 'welcome');
+  on('regular:streak', function (p) { play('streak', { streak: p.streak }); });
+  on('regular:broken', function (p) { play(p.shielded ? 'shield' : 'crack'); });
+  say('regular:lost', 'farewell', { delay: 0.3 });     // usually lands right after the streak broke
+  say('loyalty', 'loyal', { delay: 0.1 });             // just after the sale's coin
+  on('dealer:buy', function () { lastDeal = ctx ? ctx.currentTime : 0; play('chaching'); });
+  on('boost:on', function () { play('powerup', { delay: ctx && ctx.currentTime - lastDeal < 0.2 ? 0.3 : 0 }); });   // after the ka-ching
   on('toast', function (p) { play('blip', { kind: p.kind }); });
   on('phase', function (p) {
     if (!MOODS[p.to] || p.to === mood) return;
