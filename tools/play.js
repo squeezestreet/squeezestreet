@@ -9,6 +9,7 @@
  *   {wait:ms}          {click:"text"}  first visible button / link whose text or aria-label contains it
  *   {clickSel:"css"}   {tap:[x,y]}  {after:ms} pause after a click (default 350)
  *   {eval:"js"}        {log:"js"} prints the JSON value     {shot:"name"} saves outdir/name.png
+ *   {transparent:true} later shots keep transparency (for logos and icons on a transparent page)
  */
 const { spawn } = require('child_process');
 const fs = require('fs'), path = require('path'), os = require('os');
@@ -61,6 +62,7 @@ const metrics = () => send('Emulation.setDeviceMetricsOverride', { width: view[0
     try {
       if (s.view || s.dpr) { if (s.view) view = s.view; if (s.dpr) dpr = s.dpr; await metrics(); }
       if (s.init) await send('Page.addScriptToEvaluateOnNewDocument', { source: s.init });
+      if (s.transparent) await send('Emulation.setDefaultBackgroundColorOverride', { color: { r: 0, g: 0, b: 0, a: 0 } });
       if (s.nav) {
         const url = /^[a-z]+:/i.test(s.nav) ? s.nav : 'file://' + path.join(ROOT, s.nav.split('#')[0]) + (s.nav.includes('#') ? '#' + s.nav.split('#').slice(1).join('#') : '');
         await send('Page.navigate', { url }); await sleep(1500);

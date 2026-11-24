@@ -1,0 +1,24 @@
+<!doctype html><meta charset="utf-8"><title>Squeeze Street logo preview</title>
+<!-- render: node tools/play.js with [{view:[1600,1000]},{nav:"brand/concepts/letter/preview.html"},{shot:"preview"}] -->
+<style>
+  * { box-sizing: border-box; margin: 0; }
+  body { width: 1600px; height: 1000px; display: grid; grid-template-columns: 520px 520px 560px; grid-template-rows: 540px 460px; font: 600 12px/1 system-ui, sans-serif; color: #1b1f3b; }
+  .p { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 28px; overflow: hidden; }
+  img { display: block; }
+  .pale { background: #fff4b8; grid-column: 1 / 3; }
+  .light { background: #fffdf0; }
+  .night { background: #131a3a; color: #fffdf0; }
+  .sky { background: linear-gradient(#2487d1, #4cc3f0 65%, #bfe8f7); }
+  .sizes { display: grid; grid-template-rows: 1fr 1fr; }
+  .sizes > div { display: flex; align-items: center; justify-content: center; gap: 26px; }
+  figure { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  figcaption { opacity: .55; }
+</style>
+<div class="p pale"><img src="logo.svg" width="760"></div>
+<div class="p light"><img src="mark.svg" width="512" height="512"></div>
+<div class="p night"><img src="logo.svg" width="400"><img src="logo-horizontal.svg" width="470"></div>
+<div class="p sky"><img src="logo.svg" width="440"></div>
+<div class="sizes">
+  <div class="light"><figure><img src="mark.svg" width="128"><figcaption>128</figcaption></figure><figure><img src="mark.svg" width="64"><figcaption>64</figcaption></figure><figure><img src="mark.svg" width="32"><figcaption>32</figcaption></figure><figure><img src="mark.svg" width="16"><figcaption>16</figcaption></figure></div>
+  <div class="night"><figure><img src="mark.svg" width="128"><figcaption>128</figcaption></figure><figure><img src="mark.svg" width="64"><figcaption>64</figcaption></figure><figure><img src="mark.svg" width="32"><figcaption>32</figcaption></figure><figure><img src="mark.svg" width="16"><figcaption>16</figcaption></figure></div>
+</div>

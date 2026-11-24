@@ -1,0 +1,12 @@
+<!doctype html><meta charset="utf-8"><title>slice preview</title>
+<style>
+*{box-sizing:border-box;margin:0} body{width:1600px;height:1000px;display:grid;grid-template-columns:560px 1fr;font:600 13px/1 system-ui,sans-serif;overflow:hidden}
+.col{display:grid} .left{grid-template-rows:560px 1fr 1fr} .right{grid-template-rows:520px 480px;grid-template-columns:1fr 1fr}
+.cell{display:grid;place-items:center;position:relative;overflow:hidden} .cell img{height:440px;max-width:94%;object-fit:contain} .pair{display:flex;align-items:center;gap:56px} .pale .pair img:first-child{height:450px} .pale .pair img:last-child{height:auto;width:440px}
+.big{background:linear-gradient(90deg,#fff4b8 50%,#131a3a 50%)} .big img{width:512px;height:512px;max-width:none;max-height:none}
+.row{display:flex;align-items:flex-end;justify-content:space-around;padding:0 20px 22px} figure{display:grid;justify-items:center;gap:8px} figcaption{opacity:.6}
+.pale{background:#fff4b8;grid-column:1/3} .night{background:#131a3a} .sky{background:linear-gradient(#1560d4,#2e85ea 40%,#5cabf5 63%,#98cffa 83%,#d0e9fc)}
+.tag{position:absolute;left:14px;top:12px;opacity:.55}
+</style>
+<div class="col left"><div class="cell big"><img src="mark.svg"><span class="tag" style="color:#1b1f3b">512</span></div><div class="row" style="background:#fffdf0;color:#1b1f3b"><figure><img src="mark.svg" width="128" height="128"><figcaption>128</figcaption></figure><figure><img src="mark.svg" width="64" height="64"><figcaption>64</figcaption></figure><figure><img src="mark.svg" width="32" height="32"><figcaption>32</figcaption></figure><figure><img src="mark.svg" width="16" height="16"><figcaption>16</figcaption></figure></div><div class="row" style="background:#131a3a;color:#fff4b8"><figure><img src="mark.svg" width="128" height="128"><figcaption>128</figcaption></figure><figure><img src="mark.svg" width="64" height="64"><figcaption>64</figcaption></figure><figure><img src="mark.svg" width="32" height="32"><figcaption>32</figcaption></figure><figure><img src="mark.svg" width="16" height="16"><figcaption>16</figcaption></figure></div></div>
+<div class="col right"><div class="cell pale"><div class="pair"><img src="logo.svg"><img src="logo-horizontal.svg"></div></div><div class="cell night"><img src="logo.svg"></div><div class="cell sky"><img src="logo.svg"></div></div>
