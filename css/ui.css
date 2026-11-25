@@ -286,7 +286,7 @@
 /* ====================================================================== *
  * Modals
  * ====================================================================== */
-.modal-layer { position: absolute; inset: 0; display: grid; place-items: center; padding: 14px var(--gutter-r) max(18px, env(safe-area-inset-bottom, 0px)) var(--gutter-l); }
+.modal-layer { position: absolute; inset: 0; display: grid; place-items: center; padding: max(14px, env(safe-area-inset-top, 0px)) var(--gutter-r) max(18px, env(safe-area-inset-bottom, 0px)) var(--gutter-l); }
 #modal-root > .modal-layer.is-closing { pointer-events: none; opacity: 0; transition: opacity .16s ease-in; }
 .modal-backdrop { position: absolute; inset: 0; background: rgba(19, 26, 58, .58); animation: modal-fade .2s ease-out backwards; }
 @keyframes modal-fade { from { opacity: 0; } to { opacity: 1; } }
@@ -341,7 +341,7 @@
 .toast--bad { background: #ffdcd8; }
 .toast.is-out { opacity: 0; transform: translateY(8px) scale(.96); }
 #toast-root > .toast { pointer-events: none; }               /* nothing to press in a toast: taps go through */
-#toast-root.is-over-modal { top: 10px; bottom: auto; flex-direction: column; }
+#toast-root.is-over-modal { top: var(--hud-top); bottom: auto; flex-direction: column; }
 #toast-root.is-over-modal .toast { box-shadow: var(--drop-lg); }
 /* morning prep: a toast stays off the sheet's reason line and buttons (bottom sheet), or beside the docked sheet */
 #game[data-phase="prep"] #toast-root:not(.is-over-modal) { bottom: 146px; }
@@ -417,7 +417,7 @@
  * ====================================================================== */
 #title { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--s4); padding-top: 64px; padding-bottom: 28px; overflow: hidden auto; text-align: center; transition: opacity .22s ease-in, transform .22s ease-in; }
 #title.is-leaving { pointer-events: none; opacity: 0; transform: scale(1.05); }
-.title-corner { position: absolute; top: 10px; right: var(--gutter-r); display: flex; gap: var(--s2); }
+.title-corner { position: absolute; top: var(--hud-top); right: var(--gutter-r); display: flex; gap: var(--s2); }
 
 /* The mascot logo: inline SVG from js/logo.js (both cuts; the wide one on short screens). Every animated group is wrapped
    so its pivot is its own origin (transform-origin stays 0 0), and each group runs ONE transform animation: a second

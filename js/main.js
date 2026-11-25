@@ -57,7 +57,8 @@
     var tag = e.target && e.target.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || tag === 'BUTTON' || tag === 'A') return;
     if (document.querySelector('#modal-root > *')) return;
-    var st = SS.state, k = e.key.toLowerCase();
+    var st = SS.state, k = e.key.toLowerCase(), dg = /^(?:Digit|Numpad)([123])$/.exec(e.code || '');
+    if (dg) k = dg[1];                                   // AZERTY: the top-row digits give & é " without Shift
     if (!st || !SS.Sim) return;
     if (k === 'm') {
       var on = !(st.settings.sfx || st.settings.music);
