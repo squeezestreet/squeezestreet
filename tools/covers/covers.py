@@ -1,6 +1,7 @@
-"""Finish the covers: python3 covers.py WORK OUT landscape=1920x1080 portrait=800x1200 square=800x800
+"""Finish the covers: python3 covers.py WORK OUT landscape=1920x1080 portrait=800x1200+1080x1620 square=800x800
 Each WORK/raw-<fmt>.png (rendered at 2x) is downsampled with LANCZOS to its exact size and written atomically to
-OUT/cover-<fmt>-<WxH>.png, plus a .jpg (quality 92) when the PNG is over 2 MB. Writes WORK/contact.png: the covers at
+OUT/cover-<fmt>-<WxH>.png, plus a .jpg (quality 92) when the PNG is over 2 MB. A +WxH extra size (the preview video's
+opening frame, sharper than upscaling the cover) goes to WORK/frame0-<fmt>-<WxH>.png. Writes WORK/contact.png: the covers at
 full size over the same covers at CrazyGames grid-thumbnail size (270x152, 160x240, 160x160), and WORK/thumbs.png."""
 import os, sys
 from PIL import Image
@@ -17,6 +18,7 @@ def save(im, path, **kw):
 covers = []
 for spec in specs:
     fmt, size = spec.split('=')
+    size, *extra = size.split('+')
     w, h = map(int, size.split('x'))
     raw = Image.open(os.path.join(work, 'raw-%s.png' % fmt)).convert('RGB')
     assert raw.size == (2 * w, 2 * h), '%s: raw is %s, expected %dx%d' % (fmt, raw.size, 2 * w, 2 * h)
@@ -31,6 +33,11 @@ for spec in specs:
             with Image.open(p) as chk:
                 assert chk.size == (w, h), p
                 print('%s %dx%d %.2f MB' % (p, chk.size[0], chk.size[1], os.path.getsize(p) / 1048576))
+    for ex in extra:
+        ew, eh = map(int, ex.split('x'))
+        assert ew * h == eh * w and ew <= 2 * w, '%s: %s is not the cover\'s aspect or is bigger than the raw' % (fmt, ex)
+        save(raw.resize((ew, eh), Image.LANCZOS), os.path.join(work, 'frame0-%s-%s.png' % (fmt, ex)))
+        print('video opening frame', os.path.join(work, 'frame0-%s-%s.png' % (fmt, ex)))
     covers.append((fmt, im))
 
 # contact sheet: full size on top, thumbnails at true grid size below, on the site's dark grid colour
