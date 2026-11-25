@@ -4,7 +4,7 @@
  * Prep is built once per morning and then patched in place, so steppers keep focus and
  * hold-to-repeat keeps working while the numbers around them change.
  *
- * SS.Screens = { init(), open(name) }      name: 'shop' | 'map' | 'goals' | 'dealer' (Dex the Dealer)
+ * SS.Screens = { init(), open(name) }      name: 'shop' | 'map' | 'goals' | 'dealer' (Dex the Dealer) | 'legal' (Privacy & Terms)
  * The goals modal also has a Regulars tab; the results card links to it.
  */
 (function () {
@@ -1162,13 +1162,45 @@
   }
 
   /* ------------------------------------------------------------------ *
+   * PRIVACY & TERMS (plain language; opened from the title screen)
+   * ------------------------------------------------------------------ */
+  var LEGAL_DATE = '25 November 2026';
+  var LEGAL = [
+    ['Privacy Policy', [
+      'Squeeze Street does not collect, sell or share any personal information. There are no accounts, ads, analytics or trackers in the game.',
+      'Your progress and settings are saved only in your browser\'s local storage, on your own device. Starting a new game or clearing your browser data deletes them.',
+      'The game does not send anything over the internet. Everything it needs, including its fonts, comes with the game.',
+      'If you play on a game website such as CrazyGames or itch.io, that website\'s own privacy policy covers what it collects, such as accounts, ads and cloud saves.',
+      'If this policy changes, the new version and its date will appear here.'
+    ]],
+    ['Terms & Conditions', [
+      'Squeeze Street is free to play for your personal entertainment. By playing, you agree to these terms.',
+      'The game, its code and its art are \u00a9 2026 Squeeze Street. Please do not copy, sell or re-host it without permission.',
+      'Money, boosts, flavors and other items in the game are pretend: they have no real-world value and cannot be exchanged for money.',
+      'The game is provided as it is, without warranties. We are not responsible for any loss, including lost save data.',
+      'Fonts: Bagel Fat One and Figtree, used under the SIL Open Font License 1.1.'
+    ]]
+  ];
+  function buildLegal() {
+    var el = h('div', { class: 'legal' },
+      h('p', { class: 'legal-date' }, 'Last updated ' + LEGAL_DATE));
+    LEGAL.forEach(function (sec) {
+      el.append(h('section', { class: 'legal-sec' },
+        h('h3', { class: 'display legal-h' }, sec[0]),
+        h('ul', { class: 'legal-list' }, sec[1].map(function (t) { return h('li', null, t); }))));
+    });
+    return { el: el, refresh: function () {} };
+  }
+
+  /* ------------------------------------------------------------------ *
    * Opening and closing
    * ------------------------------------------------------------------ */
   var MODALS = {
     shop: { title: 'Shop', icon: 'shop', build: buildShop },
     map: { title: 'Town map', icon: 'map', build: buildMap },
     goals: { title: 'Goals', icon: 'trophy', build: buildGoals },
-    dealer: { title: 'Dex\'s Deals', icon: 'dealer', build: buildDealer }
+    dealer: { title: 'Dex\'s Deals', icon: 'dealer', build: buildDealer },
+    legal: { title: 'Privacy & Terms', icon: 'info', build: buildLegal, any: true }   // any: works on the title screen too, with no game loaded
   };
   /** used only when ui.js is not there: a plain panel in #modal-root */
   function fallbackModal(name, def, bodyEl, onClose) {
@@ -1203,7 +1235,7 @@
   }
   function open(name) {
     var def = MODALS[name];
-    if (!def || !SS.state || !SS.state.stats) return false;
+    if (!def || (!def.any && (!SS.state || !SS.state.stats))) return false;
     closeModal();
     var view = def.build(), m = { name: name, refresh: view.refresh, close: null };
     function onClose() { if (modal === m) modal = null; }
@@ -1231,6 +1263,8 @@
         'dealer:buy', 'boost:on', 'regular:new', 'regular:lost']
         .forEach(function (e) { SS.on(e, onChange); });
       SS.on('dealer:setup', function (p) { if (p && p.step === 'ready') onChange(); });
+      var legal = document.getElementById('legal-link');
+      if (legal) legal.addEventListener('click', function () { open('legal'); });
       onPhase();
     },
     open: function (name) { return safe('open ' + name, function () { return open(name); }); }

@@ -721,3 +721,15 @@
 .dex-empty-face { width: 96px; height: 96px; animation: ss-float 3s ease-in-out infinite; }
 .dex-empty-title { font-size: var(--fs-xl); }
 .dex-empty p { margin: 0; max-width: 38ch; font-size: var(--fs-sm); color: var(--ink-soft); }
+
+/* ====================================================================== *
+ * Privacy & Terms: the small link on the title screen and its modal
+ * ====================================================================== */
+.legal-link { display: none; position: absolute; z-index: 9; left: var(--gutter-l); bottom: calc(10px + env(safe-area-inset-bottom, 0px)); padding: 6px 12px; font: 800 var(--fs-xs) var(--font-body); color: var(--ink); background: rgba(255, 255, 255, .82); border: 2px solid var(--ink); border-radius: 999px; cursor: pointer; }
+.legal-link:hover { background: var(--paper); }
+.legal-link:focus-visible { outline: 3px solid var(--sky-deep); outline-offset: 2px; }
+#game[data-phase="title"] .legal-link { display: block; }
+.legal { display: grid; gap: var(--s4, 16px); max-width: 640px; margin: 0 auto; color: var(--ink); }
+.legal-date { margin: 0; font-size: var(--fs-sm); font-weight: 700; color: var(--ink-soft); }
+.legal-h { margin: 0 0 8px; font-size: var(--fs-lg); }
+.legal-list { margin: 0; padding-left: 1.2em; display: grid; gap: 8px; font-size: var(--fs-md); line-height: 1.45; }
