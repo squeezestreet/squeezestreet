@@ -428,7 +428,8 @@
    rise over them, the brow pops and a glint crosses the lenses. Idle loops have unrelated lengths so no two parts move
    in step. Once the entrance ends ui.js adds #title.lg-done, which drops it (a layout switch would otherwise replay it).
    Tapping the lemon is ui.js squeezeLogo() (it animates the outer groups, and waits until their entrance is over).
-   Blinks and the tap wink squash an eye down behind the lens rim, so an lg-lid line shows while it is shut.
+   Blinks and the tap wink squash an eye down behind the lens rim, so a closed-eye line shows while it is shut (lg-lid here,
+   lg-wink from ui.js).
    Reduced motion: no animation at all (end of file). */
 .title-logo { flex: 0 1 min(54vh, calc((100vw - 32px) * 828 / 790), 640px); min-height: 150px; width: 100%; margin: 0; }
 .lg { display: block; width: 100%; height: 100%; overflow: visible; pointer-events: none; }

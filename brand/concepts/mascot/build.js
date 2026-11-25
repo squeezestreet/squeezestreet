@@ -3,7 +3,8 @@
  *   node brand/concepts/mascot/build.js            -> mark.svg, mark-small.svg, logo.svg, logo-horizontal.svg, preview.html,
  *                                                     copies of the four SVGs in brand/, favicon.svg (= mark-small) and js/logo.js
  *   node brand/concepts/mascot/build.js --preview  -> also renders preview.png (headless Chrome via tools/play.js)
- *   node brand/concepts/mascot/build.js --png      -> also renders brand/png/*.png and favicon-32.png (transparent)
+ *   node brand/concepts/mascot/build.js --png      -> also renders brand/png/*.png (transparent, plus logo-sky-2048 and
+ *                                                     logo-scene-3840 on backgrounds) and favicon-32.png
  * Every outline is the same visible ink weight: shapes get a centred stroke of width t drawn on top of their fill,
  * lettering gets an ink copy stroked at 2t underneath its fill (so counters stay open). Drop shadows are solid
  * ink copies moved straight down. No <text>, filters, gradients or external references.
@@ -44,6 +45,7 @@ const LEAF_VEIN = 'M162 -104C178 -180 142 -232 78 -252';
 const EYE_L = 'M-110 4V-28Q-78 -46 -42 -30V4Z';
 const EYE_R = 'M44 4V-36C44 -58 60 -68 78 -68C96 -68 112 -58 112 -36V4Z';
 const LID_L = 'M-110 -28Q-78 -46 -42 -30';                 // heavy lid: half-closed, sly
+const SHUT_L = 'M-102 -12Q-76 -30 -50 -12', SHUT_R = 'M52 -12Q78 -30 104 -12';   // shut eyes resting on the lens rim (title blink and wink only)
 const PUPILS = [[-66, -16, 13], [84, -22, 14]];
 const BROW_L = 'M-110 -78Q-78 -88 -44 -76';
 const BROW_R = 'M40 -94Q74 -118 110 -96';
@@ -177,10 +179,14 @@ function lemonTitle(t, s) {
     `<path class="lg-shine" d="${SHINE}" pathLength="1" fill="none" stroke="${C.lemonPale}" stroke-width="${t * 1.1}" stroke-linecap="round"/>` +
     PORES.map(([x, y]) => `<circle cx="${x}" cy="${y}" r="${r1(t * 0.32)}" fill="${C.lemonDeep}"/>`).join('') + outline(BODY) + '</g>');
   const pupil = ([x, y, rr]) => `<g class="lg-pupil"><circle cx="${x}" cy="${y}" r="${rr}" fill="${C.ink}" stroke="none"/></g>`;
-  // eyes pivot on their bottom edge, which hides behind the lens: they open, blink and widen out of the shades
+  // eyes pivot on their bottom edge, which hides behind the lens: they open, blink and widen out of the shades.
+  // A shut eye is a hidden lg-lid line beside the eye group (so a blink never squashes it), shown while it is shut. The tap wink
+  // shows its own lg-wink copy: Chrome does not repaint an SVG element that runs a CSS and a script opacity animation at once
   const face = `<g transform="rotate(-4) translate(0 -6)" stroke="${C.ink}" stroke-width="${ti}" stroke-linecap="round" stroke-linejoin="round">` +
     piv(['lg-eye lg-eye--l', 'lg-peek', 'lg-blink'], -76, 4, `<path d="${EYE_L}" fill="${C.white}"/>${pupil(PUPILS[0])}<path d="${LID_L}" fill="none" stroke-width="${t}"/>`) +
+    `<path class="lg-lid" d="${SHUT_L}" fill="none" stroke-width="${t}" opacity="0"/>` +
     piv(['lg-eye lg-eye--r', 'lg-peek', 'lg-blink'], 78, 4, `<path d="${EYE_R}" fill="${C.white}"/>${pupil(PUPILS[1])}`) +
+    `<path class="lg-lid" d="${SHUT_R}" fill="none" stroke-width="${t}" opacity="0"/><path class="lg-wink" d="${SHUT_R}" fill="none" stroke-width="${t}" opacity="0"/>` +
     piv(['lg-brow lg-brow--l', 'lg-browp'], -77, -80, `<path d="${BROW_L}" fill="none" stroke-width="${t}"/>`) +
     piv(['lg-brow lg-brow--r', 'lg-browp'], 75, -102, `<path d="${BROW_R}" fill="none" stroke-width="${t}"/>`) +
     piv(['lg-shades', 'lg-shadesp'], 0, 25, `<path d="${ARMS}" fill="none" stroke-width="${t * 0.8}"/><path d="${BRIDGE}" fill="none" stroke-width="${t * 0.8}"/>` +
@@ -275,6 +281,14 @@ if (process.argv.includes('--png')) {
   shot('png/logo-2048', 'logo.svg', 2048, Math.round(2048 * 856 / 818));
   for (const w of [1024, 512]) shot(`png/mark-${w}`, 'mark.svg', w, w);
   for (const w of [32, 16]) shot(`png/favicon-${w}`, 'mark-small.svg', w, w);
+  // two backed renders: the logo on the brand sky (as in preview.png) and over the game's title-screen scene (3840 x 2160)
+  const sky = path.join(tmp, 'sky.html');
+  fs.writeFileSync(sky, `<!doctype html><meta charset="utf-8"><style>*{margin:0}html,body{width:2048px;height:2048px;overflow:hidden}` +
+    `body{display:grid;place-items:center;background:linear-gradient(${C.skyDeep},${C.sky} 65%,#c8ecfb)}img{display:block;width:1640px}</style><img src="file://${path.join(BR, 'logo.svg')}">`);
+  steps.push({ view: [2048, 2048], dpr: 1 }, { nav: 'file://' + sky }, { wait: 200 }, { shot: 'png/logo-sky-2048' });
+  steps.push({ view: [1920, 1080], dpr: 2 }, { nav: 'index.html' }, { wait: 1500 }, { eval: "document.getElementById('ui').style.visibility = 'hidden';" +
+    "document.getElementById('game').insertAdjacentHTML('beforeend', '<img src=\"brand/logo.svg\" style=\"position:absolute;z-index:9;left:50%;top:6%;height:74%;transform:translateX(-50%)\">')" },
+    { wait: 500 }, { shot: 'png/logo-scene-3840' });
   const sf = path.join(tmp, 'steps.json');
   fs.writeFileSync(sf, JSON.stringify(steps));
   const log = require('child_process').execFileSync('node', [path.join(ROOT, 'tools', 'play.js'), sf, BR], { encoding: 'utf8' });

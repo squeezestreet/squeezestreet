@@ -964,7 +964,7 @@
     anim(mark, SQUISH, 560);
     leaves.forEach(function (el) { anim(el, FLICK, 760); });
     anim(eye, WINK, 640);
-    anim(q('.lg-lid--r'), LID, 640);
+    anim(q('.lg-wink'), LID, 640);
     anim(brow, BROW_DIP, 640);
     anim(grin, GRIN, 560);
     var FX = SS.FX, cv = document.getElementById('fx'), body = q('.lg-body');
