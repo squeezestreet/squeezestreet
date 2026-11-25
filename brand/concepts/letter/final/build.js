@@ -1,16 +1,17 @@
 #!/usr/bin/env node
 /* Squeeze Street logo: the S of "Squeeze" is cut through a lemon's peel.
- *   node brand/build.js          -> brand/logo.svg, logo-dark.svg, mark.svg, favicon.svg
- *   node brand/build.js --png    -> also brand/png/*.png, brand/logo-sheet.png, brand/options.png (headless Chrome, tools/play.js)
+ * Archived: the "Lemon S" finals, retired for the mascot (brand/). Writes next to itself:
+ *   node brand/concepts/letter/final/build.js          -> logo.svg, logo-dark.svg, mark.svg, favicon.svg
+ *   node brand/concepts/letter/final/build.js --png    -> also png/*.png, logo-sheet.png, options.png (headless Chrome, tools/play.js)
  * Lettering is Bagel Fat One outlined to paths by tools/ttf2svg.js. Sticker look, as in the game: one ink copy of every
  * silhouette dropped straight down (shadow), an ink outline (a fat round-joined stroke under the fills), flat fills,
  * light from the top left. Shapes are designed in local frames and placed with place(); tune the numbers in LEMON / LOCKUP.
  */
 'use strict';
 const fs = require('fs'), path = require('path');
-const ROOT = path.join(__dirname, '..');
+const ROOT = path.join(__dirname, '..', '..', '..', '..');
 const T = require(path.join(ROOT, 'tools', 'ttf2svg.js'));
-const font = T.load(path.join(__dirname, 'fonts', 'BagelFatOne-Regular.ttf'));
+const font = T.load(path.join(ROOT, 'brand', 'fonts', 'BagelFatOne-Regular.ttf'));
 const OUT = __dirname;
 
 const C = {
@@ -215,7 +216,7 @@ ${parts.map((p) => p.fill).join('\n')}
 `;
   return { svg, w, h };
 }
-const write = (file, s) => { fs.writeFileSync(path.join(OUT, file), s.svg); console.log(`wrote brand/${file} (${s.w} x ${s.h})`); return s; };
+const write = (file, s) => { fs.writeFileSync(path.join(OUT, file), s.svg); console.log(`wrote ${file} (${s.w} x ${s.h})`); return s; };
 
 /* ---- the files ----------------------------------------------------------- */
 // lockup: the lemon-S stands in for the capital S, its S a touch bigger than the cap height; "Street" stacked under
@@ -300,7 +301,7 @@ ${swatches.map(([n, c]) => `<div class="sw"><div class="chip" style="background:
   // options.png: the four concepts the panel judged, as drawn
   shot('options', 2000, 1250, css + `<div class="g" style="width:2000px;height:1250px;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:6px;background:${C.ink}">
 ${['mascot', 'squeeze', 'slice', 'letter'].map((n) => `<div class="col" style="background:${C.pale};justify-content:center;gap:18px">
-<img src="${url('concepts/' + n + '/logo.svg')}" style="max-width:820px;max-height:470px;width:auto;height:auto">${label(n, 40)}</div>`).join('\n')}
+<img src="file://${path.join(ROOT, 'brand', 'concepts', n, 'logo.svg')}" style="max-width:820px;max-height:470px;width:auto;height:auto">${label(n, 40)}</div>`).join('\n')}
 </div>`);
 
   const sf = path.join(tmp, 'steps.json');

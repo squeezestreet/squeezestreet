@@ -926,23 +926,41 @@
    * Title screen
    * ------------------------------------------------------------------ */
   function buildTitle() {
-    var words = ['Squeeze', 'Street'];
-    function layer(kind) {
-      var i = 0;
-      return h('span', { class: 'title-layer title-layer--' + kind }, words.map(function (w, wi) {
-        return h('span', { class: 'title-word title-word--' + wi }, w.split('').map(function (ch) {
-          return h('span', { class: 'title-ch', style: '--i:' + (i++) }, ch);
-        }));
-      }));
-    }
+    // the mascot logo (js/logo.js): both cuts are in the page, css/ui.css shows the wide one on short screens and animates both
+    var logo = h('h1', { class: 'title-logo display', 'aria-label': 'Squeeze Street' });
+    if (SS.LOGO) logo.innerHTML = SS.LOGO.stacked + SS.LOGO.horizontal; else logo.textContent = 'Squeeze Street';
+    logo.addEventListener('click', squeezeLogo);
     ttl.actions = h('div', { class: 'title-actions' });
     ttl.snd = btn('btn btn--icon', null, toggleSound);
     R.title.replaceChildren(
       h('div', { class: 'title-corner' }, ttl.snd, btn('btn btn--icon', ico('gear'), openSettings, { 'aria-label': 'Settings', title: 'Settings' })),
-      h('h1', { class: 'title-logo display', 'aria-label': 'Squeeze Street' },
-        h('span', { class: 'title-stack', 'aria-hidden': 'true' }, layer('shadow'), layer('ink'), layer('fill'))),
+      logo,
       h('p', { class: 'title-tag' }, 'Run the sunniest lemonade stand in town.'),
       ttl.actions);
+  }
+  /** tapping the lemon (decorative, so not a button): a squish, a wink, a leaf flick and a spray of juice.
+   *  Each targets an outer group whose CSS entrance is over, never one running an idle loop (see css/ui.css). */
+  var SQUISH = [{ transform: 'scale(1, 1)' }, { transform: 'scale(1.2, .78)', offset: 0.2 }, { transform: 'scale(.9, 1.12)', offset: 0.48 },
+    { transform: 'scale(1.05, .96)', offset: 0.74 }, { transform: 'scale(1, 1)' }];
+  var FLICK = [{ transform: 'rotate(0deg)' }, { transform: 'rotate(-16deg)', offset: 0.22 }, { transform: 'rotate(11deg)', offset: 0.5 }, { transform: 'rotate(-4deg)', offset: 0.76 }, { transform: 'rotate(0deg)' }];
+  var WINK = [{ transform: 'scale(1, 1)' }, { transform: 'scale(1, .06)', offset: 0.16 }, { transform: 'scale(1, .06)', offset: 0.62 }, { transform: 'scale(1, 1)' }];
+  var BROW_DIP = [{ transform: 'translateY(0)' }, { transform: 'translateY(9px)', offset: 0.16 }, { transform: 'translateY(9px)', offset: 0.62 }, { transform: 'translateY(0)' }];
+  var GRIN = [{ transform: 'scale(1)' }, { transform: 'scale(1.16)', offset: 0.3 }, { transform: 'scale(1)' }];
+  function squeezeLogo(e) {
+    var mark = e.target && e.target.closest ? e.target.closest('.lg-mark') : null, svg = mark && mark.ownerSVGElement;
+    if (!svg) return;
+    SS.sfx('squish');
+    if (SS.reduced()) return;
+    var q = function (s) { return svg.querySelector(s); }, leaves = svg.querySelectorAll('.lg-leaf'), i;
+    anim(mark, SQUISH, 560);
+    for (i = 0; i < leaves.length; i++) anim(leaves[i], FLICK, 760);
+    anim(q('.lg-eye--r'), WINK, 640);
+    anim(q('.lg-brow--r'), BROW_DIP, 640);
+    anim(q('.lg-grin'), GRIN, 560);
+    var FX = SS.FX, cv = document.getElementById('fx'), body = q('.lg-body');
+    if (!FX || !FX.burst || !cv || !body) return;
+    var r = body.getBoundingClientRect(), c = cv.getBoundingClientRect(), x = r.left + r.width / 2 - c.left, y = r.top + r.height * 0.4 - c.top;
+    try { FX.burst('drop', x, y, { count: 12, power: 1.2 }); FX.burst('slice', x, y, { count: 3 }); FX.burst('spark', x, y, { count: 6 }); } catch (err) { warn('FX.burst', err); }
   }
   function refreshTitle() {
     if (!ttl.actions) return;
