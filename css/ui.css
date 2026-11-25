@@ -426,12 +426,15 @@
    two transform animations at once. Entrance, once per showing: the lemon drops in wearing its shades and squashes,
    the leaf flicks, the shine draws on, the letters pop in one by one, then the shades slide down the nose, the eyes
    rise over them, the brow pops and a glint crosses the lenses. Idle loops have unrelated lengths so no two parts move
-   in step. Tapping the lemon is ui.js squeezeLogo() (it animates the outer groups, whose entrance is over by then).
+   in step. Once the entrance ends ui.js adds #title.lg-done, which drops it (a layout switch would otherwise replay it).
+   Tapping the lemon is ui.js squeezeLogo() (it animates the outer groups, and waits until their entrance is over).
+   Blinks and the tap wink squash an eye down behind the lens rim, so an lg-lid line shows while it is shut.
    Reduced motion: no animation at all (end of file). */
-.title-logo { flex: 0 1 min(54vh, calc((100vw - 32px) * 828 / 790), 520px); min-height: 150px; width: 100%; margin: 0; }
+.title-logo { flex: 0 1 min(54vh, calc((100vw - 32px) * 828 / 790), 640px); min-height: 150px; width: 100%; margin: 0; }
 .lg { display: block; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
-.lg--h { display: none; }
+.lg--h { display: none; --lg-hop: translateY(-20px) scale(.98, 1.02); }   /* a lower landing bounce: short screens have no room above the leaf */
 .lg-mark { pointer-events: visiblePainted; cursor: pointer; animation: lg-drop .95s .1s backwards; }
+#title.is-leaving .lg-mark { pointer-events: none; }
 .lg-bob { animation: lg-bob 3.2s ease-in-out 2.3s infinite; }
 .lg-tilt { animation: lg-tilt 4.7s ease-in-out 2.3s infinite; }
 .lg-leaf { animation: lg-flick 1.4s .1s backwards; }
@@ -442,6 +445,7 @@
 .lg-eye { animation: lg-eye-open .42s cubic-bezier(.3, 1.5, .55, 1) 1.22s backwards; }
 .lg-peek { animation: lg-peek-eye 5.3s ease-in-out 4.4s infinite; }
 .lg-blink { animation: lg-blink 7.3s 3.2s infinite; }
+.lg-lid { animation: lg-lid 7.3s 3.2s infinite; }
 .lg-pupil { animation: lg-peek-pupil 5.3s ease-in-out 4.4s infinite; }
 .lg-brow--r { animation: lg-brow-pop .5s cubic-bezier(.3, 1.7, .5, 1) 1.42s backwards; }
 .lg-brow--r .lg-browp { animation: lg-peek-brow 5.3s ease-in-out 4.4s infinite; }
@@ -451,13 +455,14 @@
 .lg-twinkle { animation: lg-twinkle 7.7s ease-out 1.75s infinite; }
 .lg-ch { animation: lg-pop .62s calc(.5s + var(--i) * 40ms) backwards; }
 .lg-chw { animation: lg-wave 3.6s ease-in-out calc(var(--i) * -260ms) infinite; }
+#title.lg-done :is(.lg-mark, .lg-leaf, .lg-shine, .lg-shades, .lg-eye, .lg-brow--r, .lg-grin, .lg-ch, .title-tag), #title.lg-done .title-actions .btn { animation: none; }
 
 @keyframes lg-drop {
   0% { opacity: 0; transform: translateY(-720px) scale(.84, 1.18); animation-timing-function: cubic-bezier(.55, 0, .9, .45); }
   10% { opacity: 1; }
   40% { opacity: 1; transform: translateY(0) scale(.88, 1.14); animation-timing-function: cubic-bezier(.2, .7, .4, 1); }
   52% { transform: translateY(0) scale(1.24, .74); animation-timing-function: cubic-bezier(.3, 0, .5, 1); }
-  68% { transform: translateY(-64px) scale(.95, 1.07); animation-timing-function: cubic-bezier(.5, 0, .9, .5); }
+  68% { transform: var(--lg-hop, translateY(-64px) scale(.95, 1.07)); animation-timing-function: cubic-bezier(.5, 0, .9, .5); }
   82% { transform: translateY(0) scale(1.1, .9); animation-timing-function: ease-out; }
   92% { transform: translateY(0) scale(.98, 1.02); }
   100% { opacity: 1; transform: none; }
@@ -489,6 +494,7 @@
 @keyframes lg-sway { 0%, 100% { transform: none; } 35% { transform: rotate(-4deg); } 70% { transform: rotate(3deg); } }
 @keyframes lg-wave { 0%, 100% { transform: translateY(4px) rotate(-1.3deg); } 50% { transform: translateY(-5px) rotate(1.3deg); } }
 @keyframes lg-blink { 0%, 3%, 47%, 50.5%, 53%, 56.5%, 100% { transform: none; } 1.5%, 48.8%, 54.8% { transform: scale(1, .08); } }
+@keyframes lg-lid { 0%, .8%, 1.9%, 47.9%, 49.2%, 53.9%, 55.2%, 100% { opacity: 0; } 1%, 1.7%, 48.1%, 49%, 54.1%, 55% { opacity: 1; } }   /* while lg-blink has the eyes shut */
 /* the peek: shades dip, eyes widen and look up, both brows lift (the right one high), hold, settle */
 @keyframes lg-peek-shades { 0%, 22%, 100% { transform: none; } 5%, 16% { transform: translateY(3.5px); } }
 @keyframes lg-peek-eye { 0%, 22%, 100% { transform: none; } 5%, 16% { transform: scale(1, 1.1); } }
@@ -501,7 +507,8 @@
 
 .title-tag { flex: 0 0 auto; margin: 0; padding: 7px 18px; text-wrap: balance; font-size: var(--fs-md); font-weight: 800; color: var(--ink); background: var(--paper); border: var(--line) solid var(--ink); border-radius: 999px; box-shadow: var(--drop); animation: ss-rise .45s var(--swift) .95s backwards; }
 .title-actions { flex: 0 0 auto; display: flex; flex-direction: column; align-items: stretch; gap: 14px; width: min(320px, 100%); margin-top: var(--s2); padding-bottom: 8px; }
-.title-actions .btn { animation: ss-pop-in .4s var(--spring) backwards; }
+.title-actions .btn { animation: ss-pop-in .4s var(--spring) backwards, title-wait .4s backwards; }
+@keyframes title-wait { 0%, 100% { pointer-events: none; } }   /* not clickable until it has popped in */
 .title-actions .btn:nth-child(1) { animation-delay: 1.05s; }
 .title-actions .btn:nth-child(2) { animation-delay: 1.13s; }
 .title-actions .btn:nth-child(3) { animation-delay: 1.21s; }

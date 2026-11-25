@@ -930,6 +930,11 @@
     var logo = h('h1', { class: 'title-logo display', 'aria-label': 'Squeeze Street' });
     if (SS.LOGO) logo.innerHTML = SS.LOGO.stacked + SS.LOGO.horizontal; else logo.textContent = 'Squeeze Street';
     logo.addEventListener('click', squeezeLogo);
+    // the entrance plays once per showing: when it ends or is cut short (lg-grin is its last beat) css/ui.css drops it,
+    // so a layout switch or turning Reduce motion off shows the logo at rest instead of replaying it
+    var settle = function (e) { if (e.animationName === 'lg-grin') R.title.classList.add('lg-done'); };
+    R.title.addEventListener('animationend', settle);
+    R.title.addEventListener('animationcancel', settle);
     ttl.actions = h('div', { class: 'title-actions' });
     ttl.snd = btn('btn btn--icon', null, toggleSound);
     R.title.replaceChildren(
@@ -939,24 +944,29 @@
       ttl.actions);
   }
   /** tapping the lemon (decorative, so not a button): a squish, a wink, a leaf flick and a spray of juice.
-   *  Each targets an outer group whose CSS entrance is over, never one running an idle loop (see css/ui.css). */
+   *  Each targets an outer group that runs only the CSS entrance, never one running an idle loop (see css/ui.css),
+   *  so a tap waits until the entrance and the last squeeze are over: starting now would snap those groups back. */
   var SQUISH = [{ transform: 'scale(1, 1)' }, { transform: 'scale(1.2, .78)', offset: 0.2 }, { transform: 'scale(.9, 1.12)', offset: 0.48 },
     { transform: 'scale(1.05, .96)', offset: 0.74 }, { transform: 'scale(1, 1)' }];
   var FLICK = [{ transform: 'rotate(0deg)' }, { transform: 'rotate(-16deg)', offset: 0.22 }, { transform: 'rotate(11deg)', offset: 0.5 }, { transform: 'rotate(-4deg)', offset: 0.76 }, { transform: 'rotate(0deg)' }];
   var WINK = [{ transform: 'scale(1, 1)' }, { transform: 'scale(1, .06)', offset: 0.16 }, { transform: 'scale(1, .06)', offset: 0.62 }, { transform: 'scale(1, 1)' }];
+  var LID = [{ opacity: 0 }, { opacity: 0, offset: 0.1 }, { opacity: 1, offset: 0.16 }, { opacity: 1, offset: 0.62 }, { opacity: 0, offset: 0.7 }, { opacity: 0 }];   // the closed lid, in step with WINK
   var BROW_DIP = [{ transform: 'translateY(0)' }, { transform: 'translateY(9px)', offset: 0.16 }, { transform: 'translateY(9px)', offset: 0.62 }, { transform: 'translateY(0)' }];
   var GRIN = [{ transform: 'scale(1)' }, { transform: 'scale(1.16)', offset: 0.3 }, { transform: 'scale(1)' }];
   function squeezeLogo(e) {
     var mark = e.target && e.target.closest ? e.target.closest('.lg-mark') : null, svg = mark && mark.ownerSVGElement;
     if (!svg) return;
+    var q = function (s) { return svg.querySelector(s); }, leaves = [].slice.call(svg.querySelectorAll('.lg-leaf'));
+    var eye = q('.lg-eye--r'), brow = q('.lg-brow--r'), grin = q('.lg-grin');
+    if ([mark, eye, brow, grin].concat(leaves).some(function (el) { return el && el.getAnimations && el.getAnimations().length; })) return;
     SS.sfx('squish');
     if (SS.reduced()) return;
-    var q = function (s) { return svg.querySelector(s); }, leaves = svg.querySelectorAll('.lg-leaf'), i;
     anim(mark, SQUISH, 560);
-    for (i = 0; i < leaves.length; i++) anim(leaves[i], FLICK, 760);
-    anim(q('.lg-eye--r'), WINK, 640);
-    anim(q('.lg-brow--r'), BROW_DIP, 640);
-    anim(q('.lg-grin'), GRIN, 560);
+    leaves.forEach(function (el) { anim(el, FLICK, 760); });
+    anim(eye, WINK, 640);
+    anim(q('.lg-lid--r'), LID, 640);
+    anim(brow, BROW_DIP, 640);
+    anim(grin, GRIN, 560);
     var FX = SS.FX, cv = document.getElementById('fx'), body = q('.lg-body');
     if (!FX || !FX.burst || !cv || !body) return;
     var r = body.getBoundingClientRect(), c = cv.getBoundingClientRect(), x = r.left + r.width / 2 - c.left, y = r.top + r.height * 0.4 - c.top;
@@ -990,7 +1000,7 @@
   function showTitle(on) {
     var el = R.title;
     clearTimeout(ttl.timer);
-    if (on) { el.classList.remove('is-leaving'); if (el.hidden) { el.hidden = false; } refreshTitle(); return; }
+    if (on) { el.classList.remove('is-leaving'); if (el.hidden) { el.hidden = false; el.classList.toggle('lg-done', SS.reduced()); } refreshTitle(); return; }
     if (el.hidden) return;
     if (SS.reduced()) { el.hidden = true; return; }
     el.classList.add('is-leaving');                          // a quick fade so the scene is not uncovered with a snap

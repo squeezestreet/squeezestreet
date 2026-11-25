@@ -73,6 +73,7 @@
   function boot() {
     tryInit('Render', SS.Render);
     tryInit('Sim', SS.Sim);
+    document.getElementById('game').classList.toggle('reduced', SS.reduced());   // Render.init ran before Sim loaded the saved settings
     tryInit('UI', SS.UI);
     tryInit('Screens', SS.Screens);
     if (SS.Debug) { try { SS.Debug.run(); } catch (e) { console.error('[SS] debug failed', e); } }
