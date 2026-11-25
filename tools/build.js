@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* Bundle the game into ONE self-contained file (CSS, JS and fonts inlined, debug.js left out).
+/* Bundle the game into ONE self-contained file (CSS, JS, fonts and favicons inlined, debug.js left out).
  *   node tools/build.js                 -> dist/squeeze-street.html, a page fragment without <html>/<head>/<body>
  *                                          wrappers so it can be published as a hosted page (browsers open it fine too)
  *   node tools/build.js --doc out.html  -> a complete standalone document (doctype and all) at out.html
@@ -20,7 +20,9 @@ html = html.replace(/<link rel="preload" href="fonts\/[^"]+"[^>]*>\n?/g, '');
 html = html.replace(/<link rel="stylesheet" href="(css\/[^"]+)">/g, (_, p) => `<style>\n${css(p)}\n</style>`);
 html = html.replace(/<script src="(js\/[^"]+)"><\/script>\n?/g, (_, p) =>
   p === 'js/debug.js' ? '' : `<script>\n${read(p).replace(/<\/script/gi, '<\\/script')}\n</script>\n`);
-if (/(src|href)="(js|css|fonts)\//.test(html)) throw new Error('a local file was left un-inlined');
+html = html.replace(/href="(favicon[^"]*\.(svg|png))"/g, (_, p, ext) =>
+  `href="data:image/${ext === 'svg' ? 'svg+xml' : 'png'};base64,${fs.readFileSync(path.join(root, p)).toString('base64')}"`);
+if (/(src|href)="((js|css|fonts)\/|favicon)/.test(html)) throw new Error('a local file was left un-inlined');
 
 if (!docOut) {
   html = html
