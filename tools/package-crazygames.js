@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /* Build the CrazyGames upload: dist/crazygames/squeeze-street.zip with index.html at the zip root, plus css/, js/
- * (without debug.js), fonts/ (woff2 + OFL licenses) and the favicons. Nothing else goes in.
+ * (without debug.js or the admin testing tools in admin.js), fonts/ (woff2 + OFL licenses) and the favicons. Nothing else goes in.
  *   node tools/package-crazygames.js
  * Self-checks: the zipped index.html loads no debug.js and no absolute or http(s) URL, and every file it or the CSS
  * points at is in the zip.
@@ -16,13 +16,13 @@ const files = [
   ...['css', 'js'].flatMap((d) => fs.readdirSync(path.join(root, d)).filter((f) => /\.(css|js)$/.test(f)).map((f) => d + '/' + f)),
   ...fs.readdirSync(path.join(root, 'fonts')).filter((f) => /\.woff2$|^OFL-.*\.txt$/.test(f)).map((f) => 'fonts/' + f),
   'favicon.svg', 'favicon-32.png'
-].filter((f) => f !== 'js/debug.js');
+].filter((f) => f !== 'js/debug.js' && f !== 'js/admin.js');
 for (const f of files) {
   fs.mkdirSync(path.join(stage, path.dirname(f)), { recursive: true });
   fs.copyFileSync(path.join(root, f), path.join(stage, f));
 }
 fs.writeFileSync(path.join(stage, 'index.html'),
-  fs.readFileSync(path.join(root, 'index.html'), 'utf8').replace(/<script src="js\/debug\.js"><\/script>\n?/, ''));
+  fs.readFileSync(path.join(root, 'index.html'), 'utf8').replace(/<script src="js\/(debug|admin)\.js"><\/script>\n?/g, ''));
 
 fs.mkdirSync(outDir, { recursive: true });
 fs.rmSync(zipPath, { force: true });                          // zip would otherwise add to an old archive
@@ -33,9 +33,9 @@ fs.rmSync(stage, { recursive: true, force: true });
 const list = execFileSync('/usr/bin/unzip', ['-Z1', zipPath], { encoding: 'utf8' }).split('\n').filter((f) => f && !f.endsWith('/'));
 const unz = (f) => execFileSync('/usr/bin/unzip', ['-p', zipPath, f], { encoding: 'utf8', maxBuffer: 1 << 26 });
 const html = unz('index.html');
-if (/debug\.js/.test(html)) fail('index.html still references debug.js');
+if (/debug\.js|admin\.js/.test(html)) fail('index.html still references debug.js or admin.js');
 if (/(src|href)="(\/|[a-z]+:)|https?:\/\//i.test(html)) fail('index.html has an absolute or http(s) URL');
-if (list.some((f) => /debug\.js|\.DS_Store|^(tools|test|brand|dist|\.git)\//.test(f))) fail('unwanted file in zip');
+if (list.some((f) => /debug\.js|admin\.js|\.DS_Store|^(tools|test|brand|dist|\.git)\//.test(f))) fail('unwanted file in zip');
 const refs = [...html.matchAll(/(?:src|href)="([^"]+)"/g)].map((m) => m[1]);
 for (const css of list.filter((f) => f.endsWith('.css')))
   for (const m of unz(css).matchAll(/url\((?!#|data:)['"]?([^)'"]+)/g)) refs.push(path.posix.join(path.posix.dirname(css), m[1]));

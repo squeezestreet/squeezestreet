@@ -148,7 +148,26 @@
     ctx.save();
     ctx.transform(1, 0, -lean / (im.ay * sc), 1, x, y);
     blit(ctx, im, -im.ax * sc, -im.ay * sc, im.w * sc, im.h * sc);
+    if (im.tree) noteTree(ctx, -im.ax * sc, -im.ay * sc, im.w * sc, im.h * sc, im);
     ctx.restore();
+  }
+  /* Where trees were drawn this frame, in CSS px, so a click can find one (SS.Backdrops.treeAt; admin.js uses it). */
+  var treeBoxes = [];
+  function noteTree(ctx, x, y, w, h, im) {
+    if (treeBoxes.length >= 64 || !ctx.getTransform) return;
+    var m = ctx.getTransform(), d = (SS.view && SS.view.dpr) || 1, xs = [x, x + w], ys = [y, y + h], x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9, i, j, px, py;
+    for (i = 0; i < 2; i++) for (j = 0; j < 2; j++) {
+      px = (m.a * xs[i] + m.c * ys[j] + m.e) / d; py = (m.b * xs[i] + m.d * ys[j] + m.f) / d;
+      if (px < x0) x0 = px; if (px > x1) x1 = px; if (py < y0) y0 = py; if (py > y1) y1 = py;
+    }
+    treeBoxes.push({ x0: x0, y0: y0, x1: x1, y1: y1, m: m.inverse(), d: d, x: x, y: y, w: w, h: h, im: im });
+  }
+  /** is the tree's own art (not its sprite's clear margin) under CSS px (sx, sy)? */
+  function onTree(b, sx, sy) {
+    var X = sx * b.d, Y = sy * b.d, m = b.m, lx = m.a * X + m.c * Y + m.e, ly = m.b * X + m.d * Y + m.f, c = b.im.c;
+    var u = Math.floor((lx - b.x) / b.w * c.width), v = Math.floor((ly - b.y) / b.h * c.height);
+    if (u < 0 || v < 0 || u >= c.width || v >= c.height) return false;
+    try { return c.getContext('2d').getImageData(u, v, 1, 1).data[3] > 100; } catch (e) { return true; }
   }
   function putFlip(ctx, im, x, y, sc) { ctx.save(); ctx.translate(x, y); ctx.scale(-1, 1); put(ctx, im, 0, 0, sc); ctx.restore(); }
   /** wind sway at world x (world units of lean per unit of "bendiness") */
@@ -452,7 +471,9 @@
   }
   function treeSprite(S, seed, ht, pal, wide, o) {
     var w = ht * (wide ? 1.2 : 1.02), h = ht * 1.03;
-    return S.sprite(w, h, w / 2, h - 1, function (g) { paintLeafy(g, seed, ht, pal, wide); }, o);
+    var im = S.sprite(w, h, w / 2, h - 1, function (g) { paintLeafy(g, seed, ht, pal, wide); }, o);
+    im.tree = true;
+    return im;
   }
   function bush(g, x, y, w, h, seed, pal) { crown(g, x, y - h * 0.5, w * 0.5, h * 0.56, seed, pal); }
   function tuft(g, x, y, s, col) {
@@ -1229,7 +1250,7 @@
     }
     circ(g, tx - 5, ty + 5, 4.6, '#7a5a3a'); circ(g, tx + 4, ty + 6, 4.4, '#6b4e32'); circ(g, tx, ty + 2, 4, '#86653f');
   }
-  function palmSprite(S, seed, ht) { var w = ht * 0.95, h = ht * 1.0; return S.sprite(w, h, w / 2, h - 2, function (g) { paintPalm(g, seed, ht); }); }
+  function palmSprite(S, seed, ht) { var w = ht * 0.95, h = ht * 1.0, im = S.sprite(w, h, w / 2, h - 2, function (g) { paintPalm(g, seed, ht); }); im.tree = true; return im; }
 
   function paintUmbrella(g, x, y, c1, c2) {               // canopy centre at x,y; pole foot about 70 below
     var k, a0, a1;
@@ -2432,7 +2453,13 @@
     drawBack: function (ctx, view, env) {
       if (!ctx || !view || !env) return;
       if (!ticked) { try { tick(view, env); } catch (e) { warn('update', e); } }
+      treeBoxes.length = 0;
       draw(ctx, view, env, false);
+    },
+    /** true when CSS-pixel point (sx, sy) on the scene canvas is on a tree drawn in the last frame */
+    treeAt: function (sx, sy) {
+      for (var i = treeBoxes.length - 1; i >= 0; i--) { var b = treeBoxes[i]; if (sx >= b.x0 && sx <= b.x1 && sy >= b.y0 && sy <= b.y1 && onTree(b, sx, sy)) return true; }
+      return false;
     },
     drawFront: function (ctx, view, env) {
       ticked = false;
