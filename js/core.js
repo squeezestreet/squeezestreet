@@ -393,6 +393,197 @@
   DATA.byId = function (list, id) { for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i]; return null; };
 
   /* ------------------------------------------------------------------ *
+   * EXPANSION CONTRACT: food truck + nationwide campaign, customisation, "Mom Got Groceries!", Squeezy the mascot.
+   * Data lives here; rules live in sim.js; art in actors.js (stand, people), vehicles.js (truck, Mom's car), mascot.js;
+   * screens in screens.js / ui.js. Numbers below are starting points: sim.js tuning may change values, never ids.
+   *
+   * NEW STATE (all optional in old saves; sim.js load() fills defaults so every existing save keeps working)
+   *   state.truck: null | {                     // null until bought
+   *     at: cityId,                             // where the truck is ('home' = parked next to your stand)
+   *     route: null | { from, to, left, total },// travelling: days left (no sales, no rent while travelling)
+   *     open: true,                             // true = trading at `at` each day (pays that city's rent); false = parked, free
+   *     price: 2.00,                            // the truck's own cup price (flavor and recipe are the stand's)
+   *     daysAt: 0,                              // trading days in a row at `at` (crowds thin out the longer you stay)
+   *     visited: [cityIds],
+   *     total: { days, cups, revenue, costs, profit }
+   *   }
+   *   state.custom: {
+   *     owned: ['stand.decor.flowers', ...],    // bought keys 'target.slot.id'; anything with cost 0 counts as owned
+   *     stand: { paint, trim, awning, sign, layout, decor: [ids, at most 4], name: 'LEMONADE' },
+   *     truck: { paint, accent, wrap, topper, awning, lights, name: 'SQUEEZE STREET' }
+   *   }
+   *   state.groceriesLast: 0                    // day of Mom's last grocery run
+   *   state.today.groceries: null | { at, eta, done, items }   // rolled at day start: Mom arrives at clock `at` (seconds)
+   *   DayResult.truck: null | { city, status: 'trading'|'travelling'|'arrived'|'parked', cups, revenue, supplies, rent, fuel, profit, weather }
+   *   DayResult.groceries: null | { lemons, sugar, ice, cups }     // what Mom brought today
+   *   DayResult.profit now includes truck profit; DayResult.standProfit is the stand alone (milestones about "one day"
+   *   keep using the stand's own numbers so old progression is unchanged).
+   *
+   * NEW SIM API (SS.Sim)
+   *   truckUnlocked() -> bool                   buyTruck() -> {ok, reason}
+   *   truckGo(cityId) -> {ok, reason, days, fuel}   prep only; pays fuel now, leaves when the day starts ('home' brings it back)
+   *   truckSetOpen(bool)   truckSetPrice(n)     truckEstimate(cityId) -> { cupsLo, cupsHi, lo, hi, rent, fuel, days }  (daily profit range)
+   *   cityWeather(cityId, day) -> { type, temp }   deterministic per seed/day/city (a forecast the campaign map can show)
+   *   customOwned(target, slot, id) -> bool     customBuy(target, slot, id) -> {ok, reason}
+   *   customSet(target, slot, value) -> {ok, reason}   value: an option id; for 'decor' toggles that id; for 'name' a string
+   *   customAppeal(target) -> 0..DATA.custom.appealCap   extra customers from the look ('stand' applies to the stand day, 'truck' to truck sales)
+   *
+   * NEW BUS EVENTS
+   *   'truck:buy' {}   'truck:set' {}   'truck:depart' {from, to, days}   'truck:arrive' {city}   'truck:day' {result}
+   *   'custom:buy' {target, slot, id}   'custom:set' {target, slot, value}
+   *   'groceries:incoming' {eta}                Mom's car is on its way: the bags reach the stand `eta` game seconds later
+   *   'groceries' {items: {lemons, sugar, ice, cups}}   the bags land: stock already increased, sold-out cleared
+   * 'cash' reasons added: 'truck' (truck profit in, or loss out), 'rent', 'fuel', 'custom'
+   * ------------------------------------------------------------------ */
+  DATA.mascot = { name: 'Squeezy', tagline: 'Stay zesty!' };
+
+  DATA.truck = {
+    cost: 1500,                 // buy price
+    unlockLocation: 'downtown', // available once this location is unlocked (or lifetime sales reach unlockLifetime)
+    unlockLifetime: 2500,
+    capacity: 220,              // most cups it can sell in a day
+    priceStart: 2.0,
+    fuelPerMap: 180,            // fuel cost per 1.0 of map distance
+    mapPerDay: 0.32,            // map distance covered per travel day
+    fatigue: 0.08               // demand lost per extra day in a row at the same city (floored at 55%)
+  };
+  // x, y: position on the campaign map (0..1, x east, y south). traffic: passers-by a day; demand: thirst (1 = normal);
+  // tolerance: what prices they accept relative to normal; rent: per trading day; supply: local cost of supplies (x market);
+  // climate: which weather it leans to.
+  DATA.cities = [
+    { id: 'home',     name: 'Home',             x: 0.50, y: 0.55, traffic: 0,   demand: 0,    tolerance: 1,    rent: 0,   supply: 1,    climate: 'mild',  blurb: 'Parked next to your stand.' },
+    { id: 'maple',    name: 'Maple Falls',      x: 0.62, y: 0.40, traffic: 70,  demand: 1.0,  tolerance: 1.0,  rent: 45,  supply: 1.0,  climate: 'mild',  blurb: 'A friendly little town. Cheap, but quiet.' },
+    { id: 'pines',    name: 'Pinecrest',        x: 0.34, y: 0.30, traffic: 90,  demand: 0.75, tolerance: 1.15, rent: 60,  supply: 1.1,  climate: 'cool',  blurb: 'Mountain hikers. Cool air, low thirst.' },
+    { id: 'dust',     name: 'Dustwater Springs',x: 0.22, y: 0.66, traffic: 80,  demand: 1.9,  tolerance: 1.5,  rent: 110, supply: 1.35, climate: 'hot',   blurb: 'Desert town. Few people, all of them parched.' },
+    { id: 'sunport',  name: 'Sunport Beach',    x: 0.80, y: 0.78, traffic: 160, demand: 1.35, tolerance: 1.2,  rent: 180, supply: 1.05, climate: 'hot',   blurb: 'Boardwalk crowds and sunshine.' },
+    { id: 'harbor',   name: 'Harbor City',      x: 0.88, y: 0.32, traffic: 230, demand: 1.0,  tolerance: 1.4,  rent: 330, supply: 1.0,  climate: 'mild',  blurb: 'Busy docks and office towers.' },
+    { id: 'capitol',  name: 'Capitol Heights',  x: 0.70, y: 0.16, traffic: 270, demand: 0.9,  tolerance: 1.65, rent: 440, supply: 1.1,  climate: 'mild',  blurb: 'Big spenders, big rent.' },
+    { id: 'bloom',    name: 'Bloomfield Fair',  x: 0.40, y: 0.84, traffic: 300, demand: 1.25, tolerance: 1.3,  rent: 600, supply: 1.2,  climate: 'hot',   blurb: 'The state fair. Huge crowds, huge rent.' },
+    { id: 'neon',     name: 'Neon Bay',         x: 0.10, y: 0.20, traffic: 380, demand: 1.05, tolerance: 1.85, rent: 780, supply: 1.25, climate: 'mild',  blurb: 'The glittering metropolis. Only for the bold.' }
+  ];
+
+  // Customisation. cost 0 = free; appeal = extra customers (summed per target, capped at appealCap);
+  // req = a milestone id or 'truck' that must be done/owned first. Colours are hex; awnings are [stripe, gap].
+  DATA.custom = {
+    appealCap: 0.15,
+    nameMax: { stand: 14, truck: 16 },
+    stand: {
+      paint: [
+        { id: 'classic', label: 'Classic', cost: 0 },   // the stand tier's own colours
+        { id: 'sunshine', label: 'Sunshine', cost: 15, color: '#ffd83d' },
+        { id: 'mint', label: 'Mint', cost: 15, color: '#7fe0b4' },
+        { id: 'bubblegum', label: 'Bubblegum', cost: 15, color: '#ff9ec4' },
+        { id: 'sky', label: 'Sky', cost: 15, color: '#8fd3ff' },
+        { id: 'grape', label: 'Grape', cost: 25, color: '#b9a2ff' },
+        { id: 'tangerine', label: 'Tangerine', cost: 25, color: '#ffb366' },
+        { id: 'charcoal', label: 'Charcoal', cost: 40, color: '#3d4a5c' },
+        { id: 'candy', label: 'Candy stripes', cost: 90, color: '#ff6257', pattern: 'stripes' },
+        { id: 'wood', label: 'Driftwood', cost: 90, color: '#c98b55', pattern: 'wood' },
+        { id: 'squeezy', label: 'Squeezy yellow', cost: 160, color: '#ffd83d', pattern: 'slices', appeal: 0.02 }
+      ],
+      trim: [
+        { id: 'classic', label: 'Classic', cost: 0 },
+        { id: 'white', label: 'White', cost: 10, color: '#ffffff' },
+        { id: 'ink', label: 'Ink', cost: 10, color: '#1b1f3b' },
+        { id: 'red', label: 'Cherry', cost: 10, color: '#ff6257' },
+        { id: 'green', label: 'Leaf', cost: 10, color: '#35c977' },
+        { id: 'gold', label: 'Gold', cost: 60, color: '#f2ae00' }
+      ],
+      awning: [
+        { id: 'classic', label: 'Classic', cost: 0 },   // the upgrade's own colours
+        { id: 'lemon', label: 'Lemon', cost: 20, colors: ['#ffd83d', '#ffffff'] },
+        { id: 'mint', label: 'Mint', cost: 20, colors: ['#35c977', '#ffffff'] },
+        { id: 'berry', label: 'Berry', cost: 20, colors: ['#ff5d8f', '#ffffff'] },
+        { id: 'ocean', label: 'Ocean', cost: 20, colors: ['#4cc3f0', '#ffffff'] },
+        { id: 'sunset', label: 'Sunset', cost: 45, colors: ['#ff9f43', '#ff6257'] },
+        { id: 'night', label: 'Midnight', cost: 45, colors: ['#2f3a6b', '#7a5cff'] },
+        { id: 'rainbow', label: 'Rainbow', cost: 120, colors: ['#ff6257', '#ffd83d', '#35c977', '#4cc3f0', '#7a5cff'], req: 'rep4', appeal: 0.02 }
+      ],
+      sign: [
+        { id: 'classic', label: 'Painted', cost: 0 },
+        { id: 'chalk', label: 'Chalkboard', cost: 30 },
+        { id: 'wood', label: 'Carved wood', cost: 40 },
+        { id: 'marquee', label: 'Marquee bulbs', cost: 110, appeal: 0.02 },
+        { id: 'neon', label: 'Neon script', cost: 160, appeal: 0.02 },
+        { id: 'squeezy', label: 'Squeezy badge', cost: 140, appeal: 0.03 }
+      ],
+      layout: [
+        { id: 'classic', label: 'Classic', cost: 0 },
+        { id: 'flipped', label: 'Flipped', cost: 0 },          // pitcher and tip jar on the other side
+        { id: 'showcase', label: 'Lemon showcase', cost: 70, appeal: 0.02 }   // a crate of lemons out front
+      ],
+      decor: [
+        { id: 'flowers', label: 'Flower boxes', cost: 35, appeal: 0.02 },
+        { id: 'bunting', label: 'Bunting flags', cost: 40, appeal: 0.02 },
+        { id: 'lights', label: 'Fairy lights', cost: 70, appeal: 0.03 },   // glow after dark
+        { id: 'balloons', label: 'Balloons', cost: 50, appeal: 0.03 },
+        { id: 'plant', label: 'Lemon tree', cost: 80, appeal: 0.02 },
+        { id: 'menu', label: 'Menu board', cost: 45, appeal: 0.02 },
+        { id: 'cutout', label: 'Squeezy cut-out', cost: 120, appeal: 0.04 },
+        { id: 'costume', label: 'Squeezy mascot suit', cost: 420, appeal: 0.07, req: 'rep3' }   // a helper in a lemon suit dances and waves
+      ]
+    },
+    truck: {
+      paint: [
+        { id: 'lemon', label: 'Lemon', cost: 0, color: '#ffd83d' },
+        { id: 'mint', label: 'Mint', cost: 40, color: '#7fe0b4' },
+        { id: 'sky', label: 'Sky', cost: 40, color: '#8fd3ff' },
+        { id: 'cherry', label: 'Cherry', cost: 40, color: '#ff6257' },
+        { id: 'grape', label: 'Grape', cost: 60, color: '#9d7bff' },
+        { id: 'charcoal', label: 'Charcoal', cost: 80, color: '#3d4a5c' },
+        { id: 'cream', label: 'Retro cream', cost: 80, color: '#fff4d6' }
+      ],
+      accent: [
+        { id: 'white', label: 'White', cost: 0, color: '#ffffff' },
+        { id: 'ink', label: 'Ink', cost: 15, color: '#1b1f3b' },
+        { id: 'red', label: 'Cherry', cost: 15, color: '#ff6257' },
+        { id: 'green', label: 'Leaf', cost: 15, color: '#35c977' },
+        { id: 'blue', label: 'Ocean', cost: 15, color: '#4cc3f0' },
+        { id: 'gold', label: 'Gold', cost: 90, color: '#f2ae00' }
+      ],
+      wrap: [
+        { id: 'none', label: 'Plain', cost: 0 },
+        { id: 'stripes', label: 'Racing stripes', cost: 90, appeal: 0.01 },
+        { id: 'dots', label: 'Polka dots', cost: 90, appeal: 0.01 },
+        { id: 'slices', label: 'Lemon slices', cost: 150, appeal: 0.02 },
+        { id: 'checker', label: 'Checkerboard', cost: 150, appeal: 0.02 },
+        { id: 'squeezy', label: 'Squeezy wrap', cost: 320, appeal: 0.04 }
+      ],
+      topper: [
+        { id: 'none', label: 'None', cost: 0 },
+        { id: 'lemon', label: 'Giant lemon', cost: 180, appeal: 0.03 },
+        { id: 'cup', label: 'Giant cup', cost: 180, appeal: 0.03 },
+        { id: 'squeezy', label: 'Squeezy head', cost: 450, appeal: 0.06 },
+        { id: 'horn', label: 'Loudspeaker', cost: 120, appeal: 0.02 }
+      ],
+      awning: [
+        { id: 'classic', label: 'Classic', cost: 0, colors: ['#ff6257', '#ffffff'] },
+        { id: 'lemon', label: 'Lemon', cost: 25, colors: ['#ffd83d', '#ffffff'] },
+        { id: 'mint', label: 'Mint', cost: 25, colors: ['#35c977', '#ffffff'] },
+        { id: 'ocean', label: 'Ocean', cost: 25, colors: ['#4cc3f0', '#ffffff'] },
+        { id: 'night', label: 'Midnight', cost: 50, colors: ['#2f3a6b', '#7a5cff'] }
+      ],
+      lights: [
+        { id: 'none', label: 'None', cost: 0 },
+        { id: 'bulbs', label: 'Bulb string', cost: 90, appeal: 0.02 },
+        { id: 'neon', label: 'Neon trim', cost: 160, appeal: 0.03 }
+      ]
+    }
+  };
+  DATA.customSlots = { stand: ['paint', 'trim', 'awning', 'sign', 'layout', 'decor', 'name'], truck: ['paint', 'accent', 'wrap', 'topper', 'awning', 'lights', 'name'] };
+  DATA.customDefaults = function () {
+    return { owned: [], stand: { paint: 'classic', trim: 'classic', awning: 'classic', sign: 'classic', layout: 'classic', decor: [], name: 'LEMONADE' },
+      truck: { paint: 'lemon', accent: 'white', wrap: 'none', topper: 'none', awning: 'classic', lights: 'none', name: 'SQUEEZE STREET' } };
+  };
+
+  // "Mom Got Groceries!": a rare mid-day surprise. Each item rolls in or out (at least two come), with a big random amount (units).
+  DATA.groceries = {
+    chance: 0.13, firstDay: 3, gap: 4, eta: 4.5,
+    items: { lemons: [40, 110], sugar: [30, 90], ice: [25, 80], cups: [50, 140] },
+    keep: 0.7                   // chance each item type is in the bags
+  };
+
+  /* ------------------------------------------------------------------ *
    * STATE SHAPE (SS.state). Created and owned by sim.js; everyone else reads.
    * ------------------------------------------------------------------
    * SS.state = {
@@ -602,7 +793,13 @@
    *
    * SS.Screens (js/screens.js)  renders prep and results into #sheet, plus shop / map / goals modals
    *   init()
-   *   open(name)                 'shop' | 'map' | 'goals' | 'dealer'
+   *   open(name)                 'shop' | 'map' | 'goals' | 'dealer' | 'legal' | 'campaign' (food truck) | 'custom' (customise)
+   *
+   * SS.Vehicles (js/vehicles.js)  the food truck and Mom's car; see the expansion contract above.
+   *   drawTruck(ctx, look, opts)            side view, origin at the ground under the middle of the truck, facing +x, in world-ish units (1 = 1px at scale 1)
+   *   drawPostcard(ctx, w, h, cityId, t, look, opts)   a little live scene of the truck trading in that city (campaign screen)
+   * SS.Actors.drawStandPreview(ctx, w, h, look, t)    the stand with a given stand look (customise screen)
+   * SS.Mascot (js/mascot.js)  name, svg, sprite(px), draw(ctx, x, y, size, opts)
    *
    * SS.ICONS (js/icons.js)  { name: '<svg viewBox="0 0 48 48" ...>...</svg>' }
    *
