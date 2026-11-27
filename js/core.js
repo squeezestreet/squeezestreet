@@ -242,8 +242,8 @@
 
   // Recipe: lemons and sugar are "per 10 cups"; ice is cubes per cup.
   DATA.recipe = {
-    lemons: { min: 1, max: 12, step: 1, start: 4, label: 'Lemons', per: 'per 10 cups' },
-    sugar: { min: 0, max: 12, step: 1, start: 4, label: 'Sugar', per: 'per 10 cups' },
+    lemons: { min: 1, max: 12, step: 1, start: 5, label: 'Lemons', per: 'per 10 cups' },
+    sugar: { min: 0, max: 12, step: 1, start: 5, label: 'Sugar', per: 'per 10 cups' },
     ice: { min: 0, max: 5, step: 1, start: 2, label: 'Ice', per: 'per cup' }
   };
   DATA.price = { min: 0.25, max: 20, step: 0.05, start: 1.0 };
@@ -370,8 +370,8 @@
   // kind + target let both sim and UI compute progress (SS.Sim.milestoneProgress).
   DATA.milestones = [
     { id: 'first', title: 'First sale', desc: 'Sell your first cup.', kind: 'cups', target: 1, reward: 2 },
-    { id: 'cups25', title: 'Lunch rush', desc: 'Sell 25 cups in one day.', kind: 'dayCups', target: 25, reward: 8 },
-    { id: 'profit20', title: 'In the black', desc: 'Make $20 profit in one day.', kind: 'dayProfit', target: 20, reward: 10 },
+    { id: 'cups25', title: 'Lunch rush', desc: 'Sell 20 cups in one day.', kind: 'dayCups', target: 20, reward: 8 },
+    { id: 'profit20', title: 'In the black', desc: 'Make $12 profit in one day.', kind: 'dayProfit', target: 12, reward: 10 },
     { id: 'rep3', title: 'Neighborhood favorite', desc: 'Reach 3 stars.', kind: 'rep', target: 3, reward: 15 },
     { id: 'tinker', title: 'Tinkerer', desc: 'Buy 3 upgrades.', kind: 'upgrades', target: 3, reward: 15 },
     { id: 'park', title: 'Fresh air', desc: 'Open your stand in Meadow Park.', kind: 'location', target: 'park', reward: 25 },
@@ -704,8 +704,9 @@
    *   setSetting(key, value)      'sfx'|'music'|'speed'|'reducedMotion'; emits 'settings'
    *   setBounds(minX, maxX)       visible world range, used for spawn / despawn
    *   -- prep --
-   *   startPrep()                 roll market, forecast and event for state.day; phase 'prep'
+   *   startPrep()                 roll market, forecast and event for state.day, pre-fill the cart; phase 'prep'
    *   setCart(item, packs)        clamps to what cash allows; emits 'cart'
+   *   restock(cups) -> cart       fill the cart for that many cups on top of the pantry, within budget; emits 'cart'
    *   cartCost() -> number
    *   prepInfo() -> { cost, cashAfter, rent, stockAfter:{...units}, maxCups, limiting, costPerCup, canStart, reason,
    *                   truckRent, truckShut, truckCity }   cashAfter also takes off the truck's rent unless the cart leaves too little for it (truckShut)
@@ -713,11 +714,11 @@
    *   setPrice(p)                 allowed in prep and during the day; emits 'price'
    *   setFlavor(id)
    *   canStartDay() -> {ok, reason}
-   *   startDay()                  pays cart + rent, fixes the weather, phase 'day'
+   *   startDay()                  pays cart + rent, fixes the weather, mixes the first pitcher, phase 'day'
    *   -- day --
    *   update(dt)                  advance the day by dt sim-seconds; ends the day itself
    *   ringBell() -> bool          pulls in passers-by for a few seconds (cooldown)
-   *   tapStand() -> bool          speeds up the batch being mixed
+   *   tapStand() -> bool          speeds up the batch being mixed, or the cup being poured when nothing is mixing
    *   collectTip(id) -> bool
    *   closeEarly()                end the day now
    *   -- results --
@@ -892,21 +893,33 @@
       if (o.onChange) o.onChange(v);
       return true;
     }
+    // A tap bumps once, on click, so a thumb swipe that starts on a button scrolls the sheet instead.
+    // Only a still press repeats, after a moment; the click that ends a repeat or a drag is swallowed.
+    var press = null;
     function hold(d) {
       return function (e) {
+        if (e.button > 0) return;
         e.preventDefault();
-        if (!bump(d)) return;
-        var delay = 340;
-        (function again() { timer = setTimeout(function () { if (bump(d)) { delay = Math.max(45, delay * 0.78); again(); } }, delay); })();
+        stop();
+        var delay = 340, p = press = { x: e.clientX, y: e.clientY, skip: false };
+        timer = setTimeout(function again() {
+          if (!bump(d)) return;
+          p.skip = true; delay = Math.max(45, delay * 0.78);
+          timer = setTimeout(again, delay);
+        }, 400);
       };
     }
-    function stop() { clearTimeout(timer); }
-    function key(d) { return function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); bump(d); } }; }
-    var minus = SS.h('button', { class: 'stepper-btn', type: 'button', 'aria-label': 'Less ' + (o.label || ''), onpointerdown: hold(-1), onkeydown: key(-1) }, '−');
-    var plus = SS.h('button', { class: 'stepper-btn', type: 'button', 'aria-label': 'More ' + (o.label || ''), onpointerdown: hold(1), onkeydown: key(1) }, '+');
+    function stop() { clearTimeout(timer); timer = 0; }
+    function moved(e) { if (press && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 8) { press.skip = true; stop(); } }
+    function tap(d) { return function () { var p = press; press = null; if (!p || !p.skip) bump(d); }; }
+    // keys bump on keydown (and repeat while held); cancelling keyup too keeps Space from also firing a click
+    function key(d) { return function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (e.type === 'keydown') bump(d); } }; }
+    var minus = SS.h('button', { class: 'stepper-btn', type: 'button', 'aria-label': 'Less ' + (o.label || ''), onpointerdown: hold(-1), onclick: tap(-1), onkeydown: key(-1), onkeyup: key(-1) }, '−');
+    var plus = SS.h('button', { class: 'stepper-btn', type: 'button', 'aria-label': 'More ' + (o.label || ''), onpointerdown: hold(1), onclick: tap(1), onkeydown: key(1), onkeyup: key(1) }, '+');
     function sync() { minus.disabled = v <= o.min; plus.disabled = v >= o.max; }
     var el = SS.h('div', { class: 'stepper', role: 'group', 'aria-label': o.label || '' }, minus, out, plus);
     ['pointerup', 'pointerleave', 'pointercancel'].forEach(function (n) { minus.addEventListener(n, stop); plus.addEventListener(n, stop); });
+    [minus, plus].forEach(function (b) { b.addEventListener('pointermove', moved); });
     el.set = function (n, max) { if (max != null) o.max = max; v = SS.clamp(n, o.min, o.max); out.textContent = fmt(v); sync(); };
     el.get = function () { return v; };
     sync();

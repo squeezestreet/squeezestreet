@@ -27,15 +27,15 @@
     lineTolerance: 0.95,  // share of their patience people will risk on the line they can see
     maxQueue: 9,
     gouge: 1.15,          // raise the price past this much of their limit and people in line walk off
-    bellCd: 20, bellActive: 4.5, bellReach: 2.2, bellBoost: 1.5,
-    tapBoost: 0.125, tapGap: 0.12,
+    bellCd: 12, bellActive: 4.5, bellReach: 2.2, bellBoost: 1.35,
+    tapBoost: 0.125, tapGap: 0.12, tapPour: 0.15,   // a tap while nobody is mixing speeds up the pour instead
     meltBase: 0.2, lemonSpoil: 0.25,
     idealLemons: 6, idealSugar: 5, sweetLean: 1.2,
     value0: 0.4,
     star0: 0.4, star1: 0.84,              // satisfaction that maps to 0 and to 5 stars
     repPull: 0.18, repN: 25, repVip: 0.3, // a full day of reviews moves the stars at most ~repPull of the way
     quitRep: 0.03,
-    tipTtl: 7,
+    tipTtl: 7, tipFloor: 0.22,   // every happy customer has at least this tip chance, so coins drop several times a day
     loanCups: 6,          // Grandma steps in when you cannot make this many cups
     maxPacks: 99,
     closeGrace: 2.5,      // seconds the last pour and last reviews get after closing time
@@ -548,6 +548,33 @@
     }
     return changed;
   }
+  /** Cheapest cart that, on top of the pantry, makes `cups` cups with the current recipe; the order shrinks until it fits the budget. */
+  function fillCart(st, cups) {
+    var saved = clamp(upVal('cooler'), 0, 1), r = st.recipe;
+    for (var want = Math.max(1, Math.ceil(fin(cups, 0))); ; want = Math.floor(want * 0.85)) {
+      var need = { lemons: want * r.lemons / 10, sugar: want * r.sugar / 10, ice: want * r.ice * (1 + 0.45 * (1 - saved)), cups: want }, cost = 0;   // ice melts as the day goes
+      ITEMS.forEach(function (it) { st.cart[it] = Math.min(TUNE.maxPacks, Math.max(0, Math.ceil((need[it] - st.stock[it]) / D.items[it].pack))); cost += st.cart[it] * st.market[it]; });
+      if (cost <= st.cash - rent() + 1e-9 || want < 5) break;
+    }
+    trimCart(st);
+  }
+  /** What the morning cart starts as: two packs of each on day 1, then about what yesterday's crowd wanted, scaled to today's forecast. */
+  function prefillCart(st) {
+    var lr = st.lastResult;
+    if (!lr || !lr.people || !lr.weather) { ITEMS.forEach(function (it) { st.cart[it] = 2; }); trimCart(st); return; }
+    var pull = function (id) { var w = D.weather[id] || D.weather.sunny; return w.traffic * w.thirst; };
+    var wanted = (lr.cups + lr.people.soldout + 0.5 * (lr.people.wait + lr.people.quit)) * 1.2 * clamp(pull(st.forecast.type) / pull(lr.weather.type), 0.45, 2.2);
+    fillCart(st, Math.max(12, wanted));                 // a washed-out yesterday still leaves a sensible order for a sunny today
+  }
+  /** Player / bot helper: fill the cart for `cups` cups. -> the cart */
+  function restock(cups) {
+    var st = SS.state;
+    if (!st || st.phase !== 'prep' || !st.market) return null;
+    fillCart(st, cups);
+    emit('cart', {});
+    persist(false);
+    return st.cart;
+  }
   /** After spending in the morning: keep the cart affordable and never leave the player stuck. */
   function afterPrepSpend(st) {
     if (st.phase !== 'prep') return;
@@ -569,6 +596,7 @@
     st.weather = { type: m.forecast.type, temp: m.forecast.temp };   // placeholder until the day starts
     st.event = m.event && m.event.known ? m.event : null;
     st.cart = zeros();
+    prefillCart(st);                // the player can still change it; a saved cart (continueGame) is kept as it was
     rollDealer(st);
     st.phase = 'prep';
     emit('phase', { from: from, to: 'prep' });
@@ -708,7 +736,7 @@
       nextId: 1, tipId: 1, map: new Map(), busy: false, wantClose: false,
       closing: false, closeT: 0, batch: 0, pourDur: 1, tapT: -1,
       cost: cost, flavorCost: 0, rent: rentPaid, iceStart: st.stock.ice, repBefore: st.reputation, repPend: 0,
-      reviews: [], vipReview: null, satSum: 0, satN: 0, sweetSum: 0, kinds: {}, lastLine: {},
+      reviews: [], vipReview: null, satSum: 0, satN: 0, sweetSum: 0, kinds: {}, said: {},
       passed: 0, served: 0, soldOutAt: null, approaching: 0, patMul: 1,
       surprise: m.event && !m.event.known ? { ev: m.event, at: 0.38 + 0.25 * rng(), done: false, until: 0 } : null,
       vipAt: ev.critic ? 0.3 + 0.3 * rng() : -1, vipSeen: false, vipServed: false,
@@ -723,6 +751,9 @@
     st.phase = 'day';
     if (cost + rentPaid > 0) emit('cash', { amount: st.cash, delta: -r2(cost + rentPaid), reason: 'supplies' });
     emit('phase', { from: 'prep', to: 'day' });
+    // the first batch was mixed while setting up, so the stand opens with a full pitcher (canStartDay made sure there is a cup's worth)
+    startBrew();
+    if (st.today.pitcher.brew != null) { st.today.pitcher.cups = rt.batch; st.today.pitcher.brew = null; emit('brew:done', { cups: rt.batch }); }
     emit('day:start', { day: st.day, weather: st.weather, event: st.event });
     rt.truck = truckStart(st);
     st.boosts.forEach(function (id) { emit('boost:on', { id: id }); });
@@ -732,6 +763,12 @@
       var x = lerp(bounds.min, bounds.max, rng());
       if (Math.abs(x - W.STAND_X) < TUNE.notice + 60) continue;
       spawn(pickKind(), x, rng() < 0.5 ? 1 : -1);
+    }
+    // and two of them were already heading over for a drink, so the first sale lands seconds after opening: both from the left,
+    // where the line is (round from the right takes twice as long), and the keener spender of two passers-by (the price still counts)
+    for (i = 0; i < 2 && rt; i++) {
+      k = pickKind(); var k2 = pickKind();
+      spawn(D.kinds[k2].wtp > D.kinds[k].wtp ? k2 : k, W.STAND_X - TUNE.notice - 40 - 55 * i, 1)._eager = true;
     }
     return { ok: true, reason: '' };
   }
@@ -807,8 +844,8 @@
     c._decided = true;
     var p = TUNE.interest * wx.thirst * k.thirst * (1 + upVal('stand')) * (1 + upVal('sign')) *
       (0.75 + 0.1 * st.reputation) * (1 + 0.4 * fl.wtp) * rt.ev.interest * (belled ? TUNE.bellBoost : 1);
-    // regulars came for you: they skip the "am I thirsty" roll
-    if (c.kind !== 'vip' && !c.regularId && rng() >= Math.min(0.95, p)) { c._cold = true; return; }   // not thirsty: walks on
+    // regulars came for you, and the opening-time crowd was already on its way: they skip the "am I thirsty" roll
+    if (c.kind !== 'vip' && !c.regularId && !c._eager && rng() >= Math.min(0.95, p)) { c._cold = true; return; }   // not thirsty: walks on
     c._cold = false;
     if (td.soldOut) { balk(c, 'soldout'); return; }
     var wxWtp = wx.thirst >= 1 ? 1 + 0.4 * (wx.thirst - 1) : 1 - 0.3 * (1 - wx.thirst);
@@ -884,11 +921,13 @@
     return tasteOut;
   }
 
+  /** A review line nobody has said yet today; once the whole pool has been said, it starts over. */
   function line(kind) {
-    var pool = LINES[kind] || LINES.great, i = Math.floor(rt.rng() * pool.length) % pool.length;
-    if (i === rt.lastLine[kind]) i = (i + 1) % pool.length;
-    rt.lastLine[kind] = i;
-    return pool[i];
+    var pool = LINES[kind] || LINES.great, said = rt.said, left = pool.filter(function (s) { return !said[s]; });
+    if (!left.length) { pool.forEach(function (s) { said[s] = false; }); left = pool; }
+    var s = left[Math.floor(rt.rng() * left.length) % left.length];
+    said[s] = true;
+    return s;
   }
 
   function completeSale(c) {
@@ -933,6 +972,10 @@
       emit('loyalty', { c: c, amount: bonus, mult: c.mult });
       emit('cash', { amount: st.cash, delta: bonus, reason: 'loyalty' });
     }
+    // 'First sale' and 'Lunch rush' pay and celebrate the moment they happen, and are still listed on tonight's results
+    var done = payMilestones(['cups', 'dayCups', 'lifetime']);
+    done.forEach(function (m) { pendingMilestones.push(m.id); });
+    announceMilestones(done);
   }
 
   function flushRep() {
@@ -973,7 +1016,7 @@
       else toast('The food critic thought it was fine. Just fine.', 'info', 'newspaper');
     }
     var jar = upLevel('tipjar');
-    if (rv.mood > 0.25 && rng() < k.tip * (0.6 + rv.mood) * rt.ev.tips * (jar ? 1.25 : 1)) {
+    if (rv.mood > 0.25 && rng() < Math.max(k.tip, TUNE.tipFloor) * (0.6 + rv.mood) * rt.ev.tips * (jar ? 1.25 : 1)) {
       var amount = Math.max(0.05, r05(rv.paid * (0.1 + 0.2 * rng()) * (jar >= 2 ? 1.6 : 1) * (vip ? 2 : 1) * (boostOn('lucky') ? TUNE.lucky : 1)));
       var tip = { id: rt.tipId++, x: c.x, lane: c.lane, amount: amount, ttl: TUNE.tipTtl };
       if (jar || closing) collect(tip, true);
@@ -1277,7 +1320,7 @@
   function milestoneValue(m, st) {
     switch (m.kind) {
       case 'cups': return st.lifetimeCups;
-      case 'dayCups': return st.stats.bestCups;
+      case 'dayCups': return Math.max(st.stats.bestCups, st.today ? st.today.sold : 0);   // today's cups count while the day runs
       case 'dayProfit': return st.stats.bestProfit;
       case 'rep': return Math.round(st.reputation * 10) / 10;       // the stars as the player sees them
       case 'upgrades': var n = 0; D.upgrades.forEach(function (u) { n += upLevel(u.id); }); return n;
@@ -1295,6 +1338,7 @@
     var st = SS.state, done = [];
     D.milestones.forEach(function (m) {
       if (st.milestonesDone.indexOf(m.id) >= 0 || (kinds && kinds.indexOf(m.kind) < 0)) return;
+      if (m.final && kinds && st.phase === 'day') return;   // the big win waits for the results screen: finalize() pays it
       if (milestoneValue(m, st) + 1e-9 < milestoneTarget(m)) return;
       st.milestonesDone.push(m.id);
       if (m.reward > 0) st.cash = r2(st.cash + m.reward);
@@ -1382,14 +1426,15 @@
   }
 
   function pickReviews(top) {
-    var out = [], byKind = {}, kinds = [], i, k, guard = 0, rng = rt.rng;
-    if (rt.vipReview) out.push(rt.vipReview);
+    var out = [], byKind = {}, kinds = [], i, k, r, guard = 0, rng = rt.rng, shown = {};
+    if (rt.vipReview) { out.push(rt.vipReview); shown[rt.vipReview.text] = true; }
     rt.reviews.forEach(function (r) { if (r !== rt.vipReview) { if (!byKind[r.kind]) { byKind[r.kind] = []; kinds.push(r.kind); } byKind[r.kind].push(r); } });
     kinds.sort(function (a, b) { return (a === top ? -1 : 0) - (b === top ? -1 : 0) || byKind[b].length - byKind[a].length; });
-    while (out.length < 6 && kinds.length && guard++ < 60) {              // round-robin, most common first
+    while (out.length < 6 && kinds.length && guard++ < 200) {             // round-robin, most common first
       for (i = 0; i < kinds.length && out.length < 6; i++) {
         k = byKind[kinds[i]];
-        out.push(k.splice(Math.floor(rng() * k.length) % k.length, 1)[0]);
+        r = k.splice(Math.floor(rng() * k.length) % k.length, 1)[0];
+        if (!shown[r.text]) { shown[r.text] = true; out.push(r); }          // a busy day repeats lines: the card shows each one once
         if (!k.length) kinds.splice(i--, 1);
       }
     }
@@ -1487,10 +1532,11 @@
   }
   function tapStand() {
     var st = SS.state, td = st && st.today;
-    if (!st || st.phase !== 'day' || !td || !rt || rt.today !== td || td.pitcher.brew == null) return false;
+    if (!st || st.phase !== 'day' || !td || !rt || rt.today !== td || (td.pitcher.brew == null && !td.serving)) return false;
     if (rt.tapT >= 0 && td.clock - rt.tapT < TUNE.tapGap) return false;
     rt.tapT = td.clock;
-    td.pitcher.brew = Math.min(1, td.pitcher.brew + TUNE.tapBoost);
+    if (td.pitcher.brew != null) td.pitcher.brew = Math.min(1, td.pitcher.brew + TUNE.tapBoost);
+    else td.serving.p = Math.min(1, td.serving.p + TUNE.tapPour);      // nothing to mix: help pour instead, so a tap always does something
     emit('brew:tap', {});
     return true;
   }
@@ -2084,7 +2130,7 @@
   SS.Sim = {
     init: init, hasSave: hasSave, saveSummary: saveSummary, newGame: newGame, continueGame: continueGame,
     save: function () { return persist(true); }, wipeSave: wipeSave, setSetting: setSetting, setBounds: setBounds,
-    startPrep: startPrep, setCart: setCart, cartCost: cartCost, prepInfo: prepInfo, setRecipe: setRecipe, setPrice: setPrice,
+    startPrep: startPrep, setCart: setCart, restock: restock, cartCost: cartCost, prepInfo: prepInfo, setRecipe: setRecipe, setPrice: setPrice,
     setFlavor: setFlavor, canStartDay: canStartDay, startDay: startDay,
     update: update, ringBell: ringBell, tapStand: tapStand, collectTip: collectTip, closeEarly: closeEarly,
     nextDay: nextDay,

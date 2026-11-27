@@ -257,23 +257,11 @@ function checkState(tag) {
 /* ---------------------------------------------------------------- *
  * Bots
  * ---------------------------------------------------------------- */
-function restock(st, cupsWanted) {
-  // cheapest cart that covers cupsWanted cups with the current recipe; shrinks until it is affordable
-  const cooler = Sim.upgradeInfo('cooler'), saved = cooler.level ? D.byId(D.upgrades, 'cooler').levels[cooler.level - 1].value : 0;
-  for (let want = cupsWanted; want >= 4; want = Math.floor(want * 0.85)) {
-    const need = { lemons: want * st.recipe.lemons / 10, sugar: want * st.recipe.sugar / 10, ice: want * st.recipe.ice * (1 + 0.45 * (1 - saved)), cups: want };
-    let cost = 0; const packs = {};
-    ITEMS.forEach((it) => { packs[it] = Math.max(0, Math.ceil((need[it] - st.stock[it]) / D.items[it].pack)); cost += packs[it] * st.market[it]; });
-    if (cost <= st.cash - Sim.rent() + 1e-9 || want < 5) { ITEMS.forEach((it) => Sim.setCart(it, packs[it])); return; }
-  }
-}
-
 function naiveBot(price) {
   return {
     name: price > 2 ? 'greedy' : 'naive', log: {},
     prep(st) {
-      Sim.setPrice(price);
-      ITEMS.forEach((it) => Sim.setCart(it, Math.max(0, 2 - Math.floor(st.stock[it] / D.items[it].pack))));
+      Sim.setPrice(price);                  // and takes the cart the morning fills in, as it is
       if (!Sim.canStartDay().ok) {          // short of cash: buy only what is actually missing
         ITEMS.forEach((it) => Sim.setCart(it, 0));
         for (let i = 0; i < 4 && !Sim.canStartDay().ok; i++) { const it = Sim.prepInfo().limiting; Sim.setCart(it, st.cart[it] + 1); }
@@ -382,7 +370,7 @@ function competentBot() {
         if (wxPull(st.forecast.type) >= 0.6) want = Math.max(want, 0.9 * st.stats.bestCups * (st.history.length && st.history[st.history.length - 1].location === st.location ? 1 : 0));
       }
       const capacity = SS.DAY_LENGTH / (Sim.serveTime() + Sim.brewTime() / Sim.cupsPerPitcher()) * 1.5;
-      restock(st, Math.ceil(Math.min(want, capacity)));
+      Sim.restock(Math.min(want, capacity));
     },
     tick(st, dt) {
       const td = st.today;
@@ -449,12 +437,14 @@ function playGame(seed, bot, days) {
     const info = Sim.prepInfo();
     ok(isNum(info.cost) && isNum(info.cashAfter) && info.cashAfter >= -1e-9 && isNum(info.maxCups) && isNum(info.costPerCup) && ITEMS.includes(info.limiting) && typeof info.canStart === 'boolean' && typeof info.reason === 'string', tag + ': prepInfo shape');
     ok(Sim.cartCost() <= st.cash - Sim.rent() + 1e-6 || Sim.cartCost() === 0, tag + ': cart costs more than cash allows');
-    const cashBefore = st.cash;
+    const cashBefore = st.cash, paidAtOpen = capture(['cash']);
     const res0 = Sim.startDay();
+    paidAtOpen.stop();
+    const flavorPaid = -paidAtOpen.of('cash').filter((p) => p.reason === 'flavor').reduce((a, p) => a + p.delta, 0);   // the first pitcher is mixed at opening
     if (!ok(res0 && res0.ok && st.phase === 'day', tag + ': could not start the day: ' + (res0 && res0.reason))) break;
     ok(isWx(st.weather), tag + ': weather not fixed at day start');
     morning.weather = Object.assign({}, st.weather);
-    ok(Math.abs(st.cash - (cashBefore - info.cost - info.rent)) < 0.011, tag + ': cart + rent were not paid correctly');
+    ok(Math.abs(st.cash - (cashBefore - info.cost - info.rent - flavorPaid)) < 0.011, tag + ': cart + rent were not paid correctly');
 
     let steps = 0;
     while (SS.state.phase === 'day') {
@@ -577,12 +567,14 @@ function morningOf(seed, day) {
   const st = SS.state;
   st.day = day - 1; st.phase = 'results'; st.lastResult = null;
   Sim.nextDay();
+  ITEMS.forEach((it) => Sim.setCart(it, 0));          // scripted mornings set their own pantry; the pre-filled cart has its own test
   return SS.state;
 }
 /** set up a well-run stand: a recipe everyone likes, a full pantry and a fast counter */
 function wellRun(st, regs, price) {
   if (regs) { st.regulars = regs; st.nextRegular = regs.length + 1; st.stats.bestStreak = Math.max(0, ...regs.map((g) => g.best)); }
   st.stock = { lemons: 300, sugar: 300, ice: 3000, cups: 600 };
+  ITEMS.forEach((it) => Sim.setCart(it, 0));
   Object.assign(st.upgrades, { pitcher: 3, juicer: 3, helper: 2, speaker: 2, awning: 2, cooler: 0 });
   st.recipe = { lemons: 6, sugar: 5, ice: 2 };
   st.price = price; st.cash = Math.max(st.cash, 500);
@@ -746,6 +738,34 @@ const rowOf = (id) => (SS.state.lastResult.regulars || []).find((r) => r.id === 
   ok(SS.state.phase === 'results' && g.streak === 4 && g.strikes === 0 && rowOf('r1').outcome === 'closed' && g.lastDay === SS.state.day, 'closing on a regular should not cost them their streak, and they came: ' + JSON.stringify(g));
 }
 
+/* The first minute: a filled cart, a full pitcher, a quick first sale that pays its goal on the spot, and a tap that always helps */
+{
+  disk.clear(); Sim.newGame(31);
+  let st = SS.state;
+  ok(ITEMS.every((it) => st.cart[it] === 2) && Sim.prepInfo().canStart, 'day 1 opens with two packs of each in the cart: ' + JSON.stringify(st.cart));
+  const cap = capture(['milestone']);
+  let firstAt = -1, goalPhase = null, tapped = false;
+  const fs = SS.on('sale', () => { if (firstAt < 0) firstAt = SS.state.today.clock; });
+  const fm = SS.on('milestone', (p) => { if (p.id === 'first') goalPhase = SS.state.phase; });
+  ok(Sim.startDay().ok && SS.state.today.pitcher.brew === null && SS.state.today.pitcher.cups === SS.state.today.pitcher.max, 'the stand opens with a full pitcher');
+  while (SS.state.phase === 'day') {
+    const td = SS.state.today;
+    if (!tapped && td.serving && td.pitcher.brew === null && td.serving.p < 0.5) { const p0 = td.serving.p; tapped = Sim.tapStand() && td.serving.p > p0; }
+    Sim.update(1 / 30);
+  }
+  SS.off('sale', fs); SS.off('milestone', fm); cap.stop();
+  const res = SS.state.lastResult, texts = res.reviews.map((r) => r.text);
+  ok(firstAt >= 0 && firstAt < 8, 'the first sale comes seconds after opening (' + firstAt.toFixed(1) + ' s)');
+  ok(goalPhase === 'day' && res.milestones.filter((id) => id === 'first').length === 1 && cap.of('milestone').filter((p) => p.id === 'first').length === 1, 'First sale pays during the day, once, and is still on the results');
+  ok(tapped, 'tapping the stand while a cup is poured speeds up the pour');
+  ok(new Set(texts).size === texts.length, 'no quote twice on one results card: ' + JSON.stringify(texts));
+  Sim.nextDay();
+  st = SS.state;
+  ok(Sim.prepInfo().maxCups >= 12 && Sim.cartCost() <= st.cash - Sim.rent() + 1e-9, 'the next morning the cart covers about yesterday\'s crowd: ' + JSON.stringify([st.cart, Sim.prepInfo().maxCups, res.cups]));
+  Sim.startDay(); Sim.closeEarly();
+  ok(Sim.restock(10) === null, 'restock only in the morning');
+}
+
 /* Frost Pack: no ice melts in the day, none spoils overnight */
 {
   for (const frost of [true, false]) {
@@ -773,13 +793,16 @@ const rowOf = (id) => (SS.state.lastResult.regulars || []).find((r) => r.id === 
 {
   const stats = {};
   for (const b of ['', 'flyers', 'golden', 'lucky']) {
-    const st = morningOf(2468, 8);
-    wellRun(st, [], 1.6);
-    st.upgrades.tipjar = 1;
-    if (b) st.boosts = [b];
-    runDay();
-    const r = SS.state.lastResult;
-    stats[b || 'plain'] = { passed: r.people.passed, pricey: r.people.pricey, tips: r.tips, served: r.people.served };
+    const s = stats[b || 'plain'] = { passed: 0, pricey: 0, tips: 0, served: 0 };
+    for (const seed of [2468, 2469, 2470]) {           // a few days, so one lucky crowd cannot decide it
+      const st = morningOf(seed, 8);
+      wellRun(st, [], 1.6);
+      st.upgrades.tipjar = 1;
+      if (b) st.boosts = [b];
+      runDay();
+      const r = SS.state.lastResult;
+      s.passed += r.people.passed; s.pricey += r.people.pricey; s.tips = r2(s.tips + r.tips); s.served += r.people.served;
+    }
   }
   ok(stats.flyers.passed > stats.plain.passed * 1.15, 'flyers should bring more people past: ' + JSON.stringify(stats));
   ok(stats.golden.pricey < stats.plain.pricey * 0.8, 'golden lemons should turn fewer people away on price: ' + JSON.stringify(stats));
@@ -849,7 +872,7 @@ const rowOf = (id) => (SS.state.lastResult.regulars || []).find((r) => r.id === 
   ok(st.dealer === null && !away.ok && away.reason === 'Dex is not in town today.', 'no deals on a day Dex stays away: ' + JSON.stringify(away));
   SS.state = null; Sim.init(); Sim.continueGame();
   ok(SS.state.day === awayDay && SS.state.dealer === null && !Sim.dealerInfo().present, 'a reload on a day Dex stays away does not bring him');
-  restock(SS.state, 12);
+  Sim.restock(12);
   const open = Sim.startDay();
   ok(open.ok, 'a day without Dex opens as usual: ' + open.reason);
   for (let i = 0; i < 200; i++) Sim.update(0.1);
@@ -1157,6 +1180,7 @@ const cupCostOf = (st) => D.byId(D.flavors, st.flavor).extraCost / 10 + ITEMS.re
   // prep counts the truck's rent, and says when the cart leaves too little for it
   st = SS.state; st.truck.at = 'neon'; st.truck.visited.push('neon'); st.truck.open = true; Sim.truckSetPrice(5);
   st.stock = { lemons: 0, sugar: 0, ice: 0, cups: 0 }; st.cash = 1000;
+  ITEMS.forEach((it) => Sim.setCart(it, 0));
   let pi = Sim.prepInfo();
   ok(pi.truckRent === 900 && !pi.truckShut && pi.cashAfter === r2(1000 - pi.rent - 900), 'cash left takes off the truck rent: ' + JSON.stringify(pi));
   ['lemons', 'sugar', 'ice', 'cups'].forEach((it) => Sim.setCart(it, 30));
