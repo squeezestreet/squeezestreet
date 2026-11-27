@@ -742,7 +742,7 @@
     stamp('SOLD OUT', clamp(q.x, V.w * 0.3, V.w * 0.7), q.y, { color: '#ff6257', size: stampSize(0.56), framed: true, slam: 1, rot: -0.12, max: 1.25, hit: lowMo ? 0 : 2 });
   });
   on('bell', function (p, V) {
-    var q = stand(BELL_DX, COUNTER_UP + 10), x = q.x, y = q.y, i;
+    var cs = SS.state && SS.state.custom, q = stand(cs && cs.stand && cs.stand.layout === 'flipped' ? 82 : BELL_DX, COUNTER_UP + 10), x = q.x, y = q.y, i;   // actors.js layout(): the bell moves in 'flipped'
     for (i = 0; i < (lowMo ? 1 : 3); i++) ring(x, y, 6, (70 + i * 26) * V.scale, 0.6, i === 1 ? '#ffffff' : '#ffd83d', 5, i * 0.11);
     emit(R.note, 4, x, y - 8);
   });
@@ -783,7 +783,7 @@
     starBurst(x, y, 1);
     if (!lowMo) act({ type: 'shine', z: 1, t: 0, max: 0.55, x0: V.toX(W.STAND_X - 120), x1: V.toX(W.STAND_X + 120), y: y, h: 200 * V.laneScale(W.STAND_LANE) });
   }
-  on('upgrade:buy', bought); on('flavor:buy', bought); on('location:unlock', bought);
+  on('upgrade:buy', bought); on('flavor:buy', bought); on('location:unlock', bought); on('custom:buy', bought);
   on('day:start', function (p, V) {
     var q = stage(), x = q.x, y = q.y, d = lowMo ? 0 : 0.2;                 // let the phase wipe clear first
     if (!lowMo) act({ type: 'sun', z: 0, t: -d, max: 1.05, x: x, y: y, size: Math.min(V.w, V.h) * 1.2 });
@@ -944,6 +944,47 @@
       if (lowMo) { emit(R.twinkle, 5, x, y); return; }
       emit(R.riseStar, 5, x, y - 20 * s); emit(R.spark, 8, x, y, -HALF, 0.8); emit(R.twinkle, 6, x, y); emit(R.pop, 1, x, y);   // rising, so nothing rains onto a sheet below
       ring(x, y, 6, 56 * s, 0.4, '#ffd83d', 3);
+    }
+  });
+
+  /* "Mom Got Groceries!": the bags land at the stand and everything inside flies to its stock count -------- */
+  var GS = null;                                          // grocery sprites, painted on first use
+  function grocSprites() {
+    if (GS) return GS;
+    function cube(fill, shine) {
+      return mk(22, 22, function (g) {
+        plate(g, 8, 8, 3.5); inked(g, fill, 2.4);
+        g.fillStyle = shine; g.fillRect(-5, -5, 5, 2.5);
+      });
+    }
+    GS = {
+      lemons: S.lemon,
+      sugar: cube('#ffffff', '#dfe2f2'),
+      ice: cube('rgba(205,238,252,.95)', '#ffffff'),
+      cups: mk(22, 26, function (g) {
+        g.beginPath(); g.moveTo(-8, -9); g.lineTo(8, -9); g.lineTo(5.5, 10); g.lineTo(-5.5, 10); g.closePath(); inked(g, '#ffffff', 2.4);
+        g.fillStyle = '#ff6257'; g.fillRect(-6.6, -2, 13.2, 4);
+        g.fillStyle = INK; g.fillRect(-9.5, -11, 19, 3);
+      })
+    };
+    return GS;
+  }
+  function stockEl(id) {
+    var el = typeof document !== 'undefined' && document.querySelector('[data-stock="' + id + '"]');
+    return el && el.getBoundingClientRect().width > 0 ? el : null;
+  }
+  on('groceries', function (p, V) {
+    if (lowMo) return;                                    // reduced motion: the banner says it all
+    var items = p.items || {}, spr = grocSprites(), q = stand(0, 70), x = q.x, y = q.y, k, n, d = 0;
+    if (covered(x, y)) return;
+    emit(R.boom, 1, x, y, null, 1, S.glows[1]); emit(R.spark, 12, x, y, null, 1.3); emit(R.puff, 5, x, y);
+    ring(x, y, 10, 110 * V.scale, 0.55, '#ffd83d', 6); ring(x, y, 10, 70 * V.scale, 0.45, '#ff8fb3', 3, 0.1);
+    for (k in spr) {
+      if (!(num(items[k]) && items[k] > 0)) continue;
+      n = clamp(Math.round(items[k] / 12), 3, 8);
+      fly(x, y - 10 * U, aim(stockEl(k), 'hud-cash'), n, spr[k], true);
+      for (var i = live - 1, j = 0; i >= 0 && j < n; i--) if (pool[i].mode === 1 && pool[i].spr === spr[k]) { pool[i].delay += d; j++; }   // each kind takes its turn
+      d += 0.18;
     }
   });
 

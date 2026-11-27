@@ -915,9 +915,9 @@
     });
 
     S.fn(1, function (ctx, va, vb, env) {                 // FRONT: parked car, a toy wagon, traffic now and then
-      var i, x, t = env.t, na = clamp((LT.night - 0.3) * 5, 0, 1), k, T, u;
+      var i, x, t = env.t, na = clamp((LT.night - 0.3) * 5, 0, 1), k, T, u, truck = SS.state && SS.state.truck;
       for (i = floor(va / 1150) - 1; i * 1150 < vb + 200; i++) {
-        x = i * 1150 + 900; if (x > va - 100 && x < vb + 100) put(ctx, cars[((i % 3) + 3) % 3], x, 168, 1);
+        x = i * 1150 + 900; if (x > va - 100 && x < vb + 100 && !(truck && i === 0)) put(ctx, cars[((i % 3) + 3) % 3], x, 168, 1);   // the food truck parks in that spot
         x = i * 1150 + 96; if (x > va - 40 && x < vb + 40) put(ctx, wagon, x, 138, 1);
       }
       if (env.reduced) return;

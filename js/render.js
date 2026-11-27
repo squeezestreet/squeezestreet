@@ -145,7 +145,7 @@
       env.dt = dt;
       updateEnv(dt);
       updateView(dt);
-      var mods = [SS.Sky, SS.Backdrops, SS.Actors, SS.FX], names = ['Sky', 'Backdrops', 'Actors', 'FX'];
+      var mods = [SS.Sky, SS.Backdrops, SS.Actors, SS.Vehicles, SS.FX], names = ['Sky', 'Backdrops', 'Actors', 'Vehicles', 'FX'];
       mods.forEach(function (m, i) { if (m && m.update) safe(names[i] + '.update', function () { m.update(dt, view, env); }); });
 
       var dpr = view.dpr, sh = (SS.FX && SS.FX.shakeOffset && !env.reduced) ? SS.FX.shakeOffset() : null;
@@ -159,6 +159,7 @@
       if (sh) sctx.setTransform(dpr, 0, 0, dpr, sh.x * dpr, sh.y * dpr);
       var layers = [
         ['Sky.draw', SS.Sky, 'draw'], ['Backdrops.drawBack', SS.Backdrops, 'drawBack'], ['Actors.draw', SS.Actors, 'draw'],
+        ['Vehicles.draw', SS.Vehicles, 'draw'],     // parked at the curb: in front of the pavement, behind the front props and traffic
         ['Backdrops.drawFront', SS.Backdrops, 'drawFront'], ['Sky.drawWeather', SS.Sky, 'drawWeather']
       ];
       layers.forEach(function (l) {

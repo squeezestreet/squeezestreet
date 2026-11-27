@@ -550,3 +550,72 @@
 /* the title is shown at rest (zeroed durations would still hold its parts back through their delays) */
 #game.reduced .lg, #game.reduced .lg *, #game.reduced .title-tag, #game.reduced .title-actions .btn { animation: none !important; }
 @media (prefers-reduced-motion: reduce) { .lg, .lg *, .title-tag, .title-actions .btn { animation: none !important; } }
+
+/* ====================================================================== *
+ * Squeezy, the mascot, in the UI (js/ui.js squeezy(pose)); and "Mom Got Groceries!"
+ * ====================================================================== */
+.sq { position: relative; display: inline-block; flex: 0 0 auto; width: 40px; height: 40px; line-height: 0; transform-origin: 50% 90%; }
+.sq img { display: block; width: 100%; height: 100%; -webkit-user-drag: none; }
+.sq--talk { animation: sq-bob 2.6s ease-in-out infinite; }
+.sq--cheer { animation: sq-cheer 1.1s var(--spring) 3; }
+.sq--wow { animation: sq-wow .5s var(--spring) both; }
+.sq--sad { transform: rotate(-14deg) translateY(3px); filter: saturate(.55) brightness(.97); }
+.sq--sleep { animation: sq-breathe 3.2s ease-in-out infinite; }
+.sq--sleep::after { content: 'z'; position: absolute; right: -6px; top: -10px; font: 400 18px/1 var(--font-display); color: var(--grape); animation: sq-z 2.4s ease-in-out infinite; }
+@keyframes sq-bob { 0%, 100% { transform: translateY(0) rotate(-3deg); } 50% { transform: translateY(-3px) rotate(3deg); } }
+@keyframes sq-cheer { 0%, 100% { transform: translateY(0) scale(1); } 20% { transform: translateY(0) scale(1.15, .85); } 45% { transform: translateY(-10px) scale(.92, 1.1) rotate(-6deg); } 70% { transform: translateY(0) scale(1.06, .94) rotate(3deg); } }
+@keyframes sq-wow { 0% { transform: scale(.6) rotate(-12deg); } 70% { transform: scale(1.12) rotate(4deg); } 100% { transform: scale(1) rotate(0); } }
+@keyframes sq-breathe { 0%, 100% { transform: scale(1) rotate(-8deg); } 50% { transform: scale(1.04, .97) rotate(-8deg); } }
+@keyframes sq-z { 0% { opacity: 0; transform: translate(0, 6px) scale(.6); } 40% { opacity: 1; } 100% { opacity: 0; transform: translate(8px, -10px) scale(1.1); } }
+@keyframes sq-beat { 0%, 100% { transform: scale(1); } 30% { transform: scale(1.3); } 60% { transform: scale(.95); } }
+
+/* Squeezy gives the coach tips, some toasts and the pause card */
+.coach-bubble.has-sq { padding-left: 58px; }
+.coach-bubble > .sq { position: absolute; left: 8px; top: 10px; width: 42px; height: 42px; }
+.toast--sq .sq { width: 2em; height: 2em; }
+.banner.has-sq { padding-right: 8px; }
+.banner > .sq { width: 46px; height: 46px; margin-left: 2px; }
+.pause-sq { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.pause-sq .sq { width: 64px; height: 64px; }
+.pause-sq-line { margin: 0; font-size: var(--fs-sm); font-weight: 800; color: var(--grape); }
+@media (max-height: 480px) { .pause-sq .sq { width: 40px; height: 40px; } }
+
+/* "Mom Got Groceries!": a big bouncy banner with a chip per item */
+.banner--groc { gap: 12px; max-width: min(540px, 100%); padding: 10px 12px 10px 10px; background: linear-gradient(180deg, #ffe8f1 0%, #fff4b8 100%); border-radius: 26px; box-shadow: var(--drop-lg); transform-origin: 50% 0; animation: groc-in .75s var(--spring) backwards; }
+.banner--groc .banner-ico { position: relative; width: 62px; height: 62px; font-size: 36px; background: var(--paper); }
+.banner--groc .banner-ico > .ico:first-child { animation: ss-wiggle .5s ease-in-out .5s 3; }
+.banner-badge { position: absolute; right: -7px; top: -7px; width: 26px; height: 26px; animation: sq-beat .9s ease-in-out .6s 3; }
+.banner--groc .label { color: #b3245a; }
+.banner--groc .banner-title { font-family: var(--font-display); font-weight: 400; font-size: var(--fs-xl); line-height: 1.05; }
+.banner-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+.banner-chip { min-height: 26px; padding: 2px 10px 2px 4px; font-size: var(--fs-sm); background: var(--paper); animation: groc-chip .45s var(--spring) backwards; animation-delay: calc(.5s + var(--i, 0) * .13s); }
+.banner-chip .ico { width: 1.4em; height: 1.4em; vertical-align: 0; }
+.banner--groc > .sq { width: 60px; height: 60px; align-self: flex-end; }
+@keyframes groc-in { 0% { opacity: 0; transform: translateY(-70px) scale(.55) rotate(-5deg); } 55% { opacity: 1; transform: translateY(10px) scale(1.06) rotate(2deg); } 78% { transform: translateY(-4px) scale(.98) rotate(-1deg); } 100% { opacity: 1; transform: none; } }
+@keyframes groc-chip { 0% { opacity: 0; transform: translateY(12px) scale(.3); } 100% { opacity: 1; transform: none; } }
+@media (max-width: 479px) {
+  .banner--groc { gap: 8px; padding: 8px; }
+  .banner--groc .banner-ico { width: 48px; height: 48px; font-size: 28px; }
+  .banner--groc .banner-title { font-size: var(--fs-lg); }
+  .banner--groc > .sq { width: 44px; height: 44px; }
+}
+/* a phone on its side: one slim row in the top-left corner, clear of the stand, Mom and the car */
+@media (max-height: 480px) {
+  .banner--groc { align-self: flex-start; gap: 8px; padding: 4px 8px 4px 4px; border-radius: 999px; }
+  .banner--groc .banner-text { flex-direction: row; align-items: center; gap: 8px; }
+  .banner--groc .label, .banner--groc .banner-desc { display: none; }
+  .banner--groc .banner-title { font-size: var(--fs-md); white-space: nowrap; }
+  .banner--groc .banner-chips { flex-wrap: nowrap; margin-top: 0; }
+  .banner--groc .banner-chip { min-height: 24px; padding: 1px 8px 1px 3px; font-size: var(--fs-xs); white-space: nowrap; }
+  .banner--groc .banner-ico { width: 40px; height: 40px; font-size: 22px; }
+  .banner--groc .banner-badge { width: 20px; height: 20px; right: -5px; top: -5px; }
+  .banner--groc > .sq { width: 36px; height: 36px; align-self: center; }
+}
+/* the heads-up: a slim banner up top (a toast would sit over the stand and the car pulling up) */
+.banner--groc-ping { background: #ffe8f1; padding: 4px 14px 4px 4px; }
+.banner--groc-ping .banner-ico { width: 34px; height: 34px; font-size: 18px; background: var(--paper); }
+.banner--groc-ping .banner-title { font-size: var(--fs-sm); }
+@media (max-height: 480px) { .banner--groc-ping { align-self: flex-start; } }
+/* reduced motion zeroes durations but not delays: show the delayed bits at once */
+#game.reduced .banner-chip, #game.reduced .banner-badge, #game.reduced .res-sq, #game.reduced .sq { animation: none !important; }
+@media (prefers-reduced-motion: reduce) { .banner-chip, .banner-badge, .res-sq, .sq { animation: none !important; } }

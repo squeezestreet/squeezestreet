@@ -86,9 +86,22 @@ function isResult(r) {
       (['broken', 'saved', 'lost'].includes(g.outcome) ? !BREAKS.includes(g.reason) : g.reason !== '')) return 'regular row ' + JSON.stringify(g);
     if (g.outcome === 'away' && g.streak < 3) return 'away row with a short streak';
   }
-  if (Math.abs(r.profit - (r.revenue + r.tips + r.loyalty - r.ingredientCost - r.rent - r.boostCost)) > 0.011) return 'profit does not add up';
+  if (!isNum(r.standProfit) || Math.abs(r.standProfit - (r.revenue + r.tips + r.loyalty - r.ingredientCost - r.rent - r.boostCost)) > 0.011) return 'stand profit does not add up';
+  if (r.truck !== null && isTruckDay(r.truck) !== '') return 'truck ' + isTruckDay(r.truck);
+  if (Math.abs(r.profit - r.standProfit - (r.truck ? r.truck.profit : 0)) > 0.011) return 'profit is not stand + truck';
+  if (r.groceries !== null && !(isObj(r.groceries) && ITEMS.every((it) => isCount(r.groceries[it])))) return 'groceries';
   return '';
 }
+const TRUCK_STATUS = ['trading', 'travelling', 'arrived', 'parked'];
+function isTruckDay(t) {
+  if (!isObj(t) || !D.byId(D.cities, t.city) || !TRUCK_STATUS.includes(t.status) || !isCount(t.cups) || !isWx(t.weather)) return 'shape ' + JSON.stringify(t);
+  if (!['revenue', 'supplies', 'rent', 'fuel'].every((k) => isNum(t[k]) && t[k] >= 0)) return 'money';
+  if (Math.abs(t.profit - (t.revenue - t.supplies - t.rent - t.fuel)) > 0.011) return 'profit does not add up';
+  if (t.status !== 'trading' && (t.cups || t.revenue || t.supplies || t.rent)) return t.status + ' with sales or rent';
+  if (t.status === 'trading' && t.fuel) return 'fuel on a trading day';
+  return '';
+}
+const lookDef = (target, slot, id) => { const l = D.custom[target] && D.custom[target][slot]; return Array.isArray(l) ? D.byId(l, id) : null; };
 
 /* every documented Sim event, with a validator for its payload */
 const SPEC = {
@@ -132,7 +145,16 @@ const SPEC = {
   'loyalty': (p) => isCustomer(p.c) && isStr(p.c.regularId) && isNum(p.amount) && p.amount > 0 && p.mult > 1 && p.mult === p.c.mult,
   'dealer:buy': (p) => (p.kind === 'boost' ? !!D.byId(D.boosts, p.id) : p.kind === 'limited' && !!(D.byId(D.flavors, p.id) || {}).limited) && isNum(p.cost) && p.cost > 0 &&
     !!SS.state.dealer && SS.state.dealer.day === SS.state.day,          // only ever bought on a day Dex is in town
-  'boost:on': (p) => !!D.byId(D.boosts, p.id)
+  'boost:on': (p) => !!D.byId(D.boosts, p.id),
+  'truck:buy': (p) => isObj(p) && isObj(SS.state.truck),
+  'truck:set': (p) => isObj(p),
+  'truck:depart': (p) => !!D.byId(D.cities, p.from) && !!D.byId(D.cities, p.to) && p.from !== p.to && Number.isInteger(p.days) && p.days >= 1,
+  'truck:arrive': (p) => !!D.byId(D.cities, p.city) && SS.state.truck.at === p.city,
+  'truck:day': (p) => isTruckDay(p.result) === '',
+  'custom:buy': (p) => !!lookDef(p.target, p.slot, p.id),
+  'custom:set': (p) => !!D.customSlots[p.target] && D.customSlots[p.target].includes(p.slot) && p.value !== undefined,
+  'groceries:incoming': (p) => isNum(p.eta) && p.eta >= 0,
+  'groceries': (p) => isObj(p.items) && ITEMS.every((it) => isCount(p.items[it])) && ITEMS.filter((it) => p.items[it] > 0).length >= 2
 };
 const seen = {};
 const phaseLog = [];
@@ -192,6 +214,21 @@ function checkState(tag) {
         typeof o.reason === 'string' && o.canBuy === (o.reason === '')), tag + ': dealerInfo shape');
     }
   }
+  // food truck, looks, Mom
+  const T = st.truck;
+  ok(T === null || (isObj(T) && !!D.byId(D.cities, T.at) && typeof T.open === 'boolean' && isNum(T.price) && T.price >= D.price.min && T.price <= D.price.max &&
+    isCount(T.daysAt) && Array.isArray(T.visited) && T.visited.includes(T.at) && T.visited.every((id) => !!D.byId(D.cities, id)) && new Set(T.visited).size === T.visited.length &&
+    (T.route === null || (T.route.from === T.at && T.route.to !== T.at && !!D.byId(D.cities, T.route.to) && Number.isInteger(T.route.left) && T.route.left >= 1 && T.route.left <= T.route.total && T.route.fuel >= 0)) &&
+    ['days', 'cups'].every((k) => isCount(T.total[k])) && isNum(T.total.revenue) && isNum(T.total.costs) && isNum(T.total.profit)), tag + ': truck ' + JSON.stringify(T));
+  const C = st.custom;
+  ok(isObj(C) && Array.isArray(C.owned) && C.owned.every((k) => { const p = k.split('.'); const d = lookDef(p[0], p[1], p[2]); return !!d && d.cost > 0; }) &&
+    ['stand', 'truck'].every((t) => D.customSlots[t].every((slot) => {
+      const v = C[t][slot], has = (id) => !!lookDef(t, slot, id) && (!(lookDef(t, slot, id).cost > 0) || C.owned.includes(t + '.' + slot + '.' + id));
+      if (slot === 'name') return typeof v === 'string' && /^[A-Z0-9 &'!.\-]+$/.test(v) && v === v.trim() && v.length <= D.custom.nameMax[t];
+      if (slot === 'decor') return Array.isArray(v) && v.length <= 4 && new Set(v).size === v.length && v.every(has);
+      return has(v);
+    })), tag + ': custom ' + JSON.stringify(C));
+  ok(isCount(st.groceriesLast) && st.groceriesLast <= st.day, tag + ': groceriesLast');
   ok((st.phase === 'day') === !!st.today, tag + ': today must exist only during the day');
   const td = st.today;
   if (!td) return;
@@ -213,6 +250,8 @@ function checkState(tag) {
   ok(td.bell.cd >= 0 && td.bell.active >= 0, tag + ': bell');
   ok(td.tips.every(isTip), tag + ': tips');
   ok(td.hourly.length === 9 && isWx(td.weatherNow), tag + ': hourly / weatherNow');
+  const g = td.groceries;
+  ok(g === null || (isNum(g.at) && isNum(g.eta) && typeof g.done === 'boolean' && ITEMS.every((it) => isCount(g.items[it]))), tag + ': today.groceries');
 }
 
 /* ---------------------------------------------------------------- *
@@ -899,6 +938,433 @@ const rowOf = (id) => (SS.state.lastResult.regulars || []).find((r) => r.id === 
   const lr = s2.lastResult;
   ok(lr.regulars.length === 1 && lr.regulars[0].mult === SS.loyaltyMult(3) && lr.regulars[0].reason === '' && JSON.stringify(lr.boosts) === '["lucky"]' && lr.loyalty === 0, 'old DayResult rows repaired');
   roundTrip('junk save');
+}
+
+/* ---------------------------------------------------------------- *
+ * Expansion: food truck, customisation, Mom's groceries
+ * ---------------------------------------------------------------- */
+const deq = (a, b) => { try { require('assert').deepStrictEqual(a, b); return true; } catch (e) { return false; } };
+const sumDelta = (cap) => r2(cap.of('cash').reduce((a, p) => a + p.delta, 0));
+const dist = (a, b) => { const A = D.byId(D.cities, a), B = D.byId(D.cities, b); return Math.sqrt((A.x - B.x) ** 2 + (A.y - B.y) ** 2); };
+const cupCostOf = (st) => D.byId(D.flavors, st.flavor).extraCost / 10 + ITEMS.reduce((a, it) => a + (it === 'cups' ? 1 : it === 'ice' ? st.recipe.ice : st.recipe[it] / 10) * st.market[it] / D.items[it].pack, 0);
+
+/* an old save (before the expansion) loads unchanged and plays a full day */
+{
+  disk.clear();
+  const old = { v: 1, phase: 'prep', day: 14, cash: 300, seed: 31, reputation: 3.8, lifetimeEarnings: 900, lifetimeCups: 700, location: 'beach',
+    unlockedLocations: ['street', 'park', 'beach'], flavor: 'mint', flavors: ['classic', 'pink', 'mint'], upgrades: { pitcher: 2, juicer: 2, helper: 1 },
+    stock: { lemons: 30, sugar: 30, ice: 200, cups: 90 }, recipe: { lemons: 6, sugar: 5, ice: 2 }, price: 2.2, milestonesDone: ['first', 'park'],
+    stats: { days: 13, bestProfit: 80, bestCups: 50, tips: 10, served: 400, bestStreak: 0 }, tutorial: { done: true } };
+  disk.set(SS.SAVE_KEY, JSON.stringify(old));
+  ok(Sim.continueGame() === true, 'an old save without truck / custom / groceriesLast should load');
+  const st = SS.state;
+  checkState('pre-expansion save');
+  ok(st.truck === null && deq(st.custom, D.customDefaults()) && st.groceriesLast === 0, 'old save gets no truck, default looks and no grocery run: ' + JSON.stringify([st.truck, st.custom, st.groceriesLast]));
+  ok(st.day === 14 && st.cash === 300 && st.reputation === 3.8 && st.location === 'beach' && st.flavor === 'mint' && st.upgrades.pitcher === 2 && st.price === 2.2 &&
+    deq(st.recipe, old.recipe) && deq(st.stock, old.stock) && deq(st.milestonesDone, old.milestonesDone), 'old save otherwise unchanged');
+  ok(Sim.customAppeal('stand') === 0 && Sim.customAppeal('truck') === 0 && !Sim.truckUnlocked(), 'old save: no appeal, no truck yet');
+  ITEMS.forEach((it) => Sim.setCart(it, 1));
+  runDay();
+  const res = st.lastResult;
+  ok(res.truck === null && res.standProfit === res.profit, 'no truck: DayResult.truck is null and profit is the stand\'s');
+  roundTrip('pre-expansion save results');
+  ok(Sim.nextDay() === true && SS.state.phase === 'prep', 'old save plays on');
+}
+
+/* broken expansion fields are cleaned up */
+{
+  disk.set(SS.SAVE_KEY, JSON.stringify({ v: 1, phase: 'prep', day: 9, cash: 50, seed: 4,
+    truck: { at: 'atlantis', route: { from: 'home', to: 'neon', left: 99, total: 2, fuel: -5 }, open: 'yes', price: 999, daysAt: -2, visited: ['neon', 'bogus', 'neon'], total: { days: 'x', profit: -40 } },
+    custom: { owned: ['stand.decor.flowers', 'stand.decor.flowers', 'stand.paint.bogus', 'truck.wrap.squeezy', 'stand.paint.classic', 42, 'a.b'],
+      stand: { paint: 'mint', trim: 'nope', decor: ['flowers', 'balloons', 'flowers', 'nope'], layout: 'flipped', name: '  hello <b>world</b>!! 123456789 ' },
+      truck: { wrap: 'squeezy', name: '', bogus: 1 } },
+    groceriesLast: 50, lastResult: { day: 8, profit: 12, truck: { city: 'maple', status: 'zoom', cups: 3.7, revenue: 9, supplies: 2, rent: 35, fuel: 0 }, groceries: { lemons: 40.6, ice: -3 } } }));
+  ok(Sim.continueGame() === true, 'a save with broken truck / custom should load');
+  checkState('junk expansion save');
+  const st = SS.state, T = st.truck;
+  ok(T.at === 'home' && deq(T.route, { from: 'home', to: 'neon', left: 2, total: 2, fuel: 0 }) && T.open === true && T.price === D.price.max && T.daysAt === 0 &&
+    deq(T.visited, ['home', 'neon']) && T.total.days === 0 && T.total.profit === -40, 'truck repaired: ' + JSON.stringify(T));
+  ok(deq(st.custom.owned, ['stand.decor.flowers', 'truck.wrap.squeezy']) && st.custom.stand.paint === 'classic' && st.custom.stand.trim === 'classic' &&
+    deq(st.custom.stand.decor, ['flowers']) && st.custom.stand.layout === 'flipped' && st.custom.stand.name === 'HELLO BWORLDB!' &&
+    st.custom.truck.wrap === 'squeezy' && st.custom.truck.name === 'SQUEEZE STREET' && !('bogus' in st.custom.truck), 'custom repaired: ' + JSON.stringify(st.custom));
+  ok(st.groceriesLast === 9, 'groceriesLast is never after today');
+  const lt = st.lastResult.truck;
+  ok(lt.status === 'parked' && lt.cups === 3 && lt.profit === r2(9 - 2 - 35) && deq(st.lastResult.groceries, { lemons: 40, sugar: 0, ice: 0, cups: 0 }) && st.lastResult.standProfit === 12, 'old DayResult truck / groceries repaired');
+  roundTrip('junk expansion save');
+}
+
+/* food truck: unlock, buy, plan a trip, travel, arrive, trade */
+{
+  let st = morningOf(77, 20);
+  st.cash = 100;
+  ok(!Sim.truckUnlocked() && !Sim.buyTruck().ok && st.truck === null, 'the truck is locked at first');
+  ok(!Sim.truckGo('maple').ok && !Sim.truckSetOpen(true).ok, 'no truck, no trips');
+  st.lifetimeEarnings = D.truck.unlockLifetime;
+  ok(Sim.truckUnlocked(), 'lifetime sales unlock the truck');
+  st.lifetimeEarnings = 0; st.unlockedLocations.push(D.truck.unlockLocation);
+  ok(Sim.truckUnlocked(), D.truck.unlockLocation + ' unlocks the truck');
+  const poor = Sim.buyTruck();
+  ok(!poor.ok && /more/.test(poor.reason) && st.truck === null && st.cash === 100, 'the truck costs money: ' + poor.reason);
+  st.cash = D.truck.cost + 1000;
+  let cap = capture(['truck:buy', 'cash', 'truck:set']);
+  ok(Sim.buyTruck().ok && isObj(st.truck) && st.truck.at === 'home' && st.cash === 1000 && st.truck.price === D.truck.priceStart, 'buying the truck');
+  ok(cap.of('truck:buy').length === 1 && cap.of('cash').some((p) => p.reason === 'truck' && p.delta === -D.truck.cost), 'truck:buy and a cash event with reason truck');
+  ok(!Sim.buyTruck().ok, 'only one truck');
+  // fuel and days follow the map
+  const days = (to) => Math.ceil(dist('home', to) / D.truck.mapPerDay - 1e-9), fuel = (to) => r2(dist('home', to) * D.truck.fuelPerMap);
+  const est = Sim.truckEstimate('harbor');
+  ok(est.days === days('harbor') && est.fuel === fuel('harbor') && est.rent === D.byId(D.cities, 'harbor').rent && est.cupsLo <= est.cupsHi && est.lo <= est.hi, 'truckEstimate: ' + JSON.stringify(est));
+  ok(deq(Sim.truckEstimate('home'), { cupsLo: 0, cupsHi: 0, lo: 0, hi: 0, rent: 0, fuel: 0, days: 0, sure: 1 }), 'home: nothing to sell, nothing to pay');
+  let go = Sim.truckGo('maple');
+  ok(go.ok && go.fuel === fuel('maple') && st.cash === r2(1000 - fuel('maple')) && st.truck.route.to === 'maple', 'fuel is paid when the trip is planned');
+  go = Sim.truckGo('harbor');
+  ok(go.ok && go.days === days('harbor') && go.fuel === fuel('harbor') && st.cash === r2(1000 - fuel('harbor')) && deq(st.truck.route, { from: 'home', to: 'harbor', left: go.days, total: go.days, fuel: go.fuel }), 'a new plan refunds the old fuel: ' + JSON.stringify(st.truck.route));
+  ok(Sim.truckGo('home').ok && st.truck.route === null && st.cash === 1000, 'choosing where it stands cancels the trip');
+  ok(Sim.truckGo('nowhere').ok === false, 'unknown city');
+  go = Sim.truckGo('harbor');
+  cap.stop();
+  ok(sumDelta(cap) === r2(st.cash - D.truck.cost - 1000), 'every truck cash change has a cash event: ' + sumDelta(cap) + ' vs ' + r2(st.cash - D.truck.cost - 1000));
+  ok(go.days >= 2, 'harbor is at least two days from home');
+  // on the road: no sales, no rent; it arrives at a day end
+  for (let d = 1; d <= go.days; d++) {
+    st = SS.state;
+    wellRun(st, null, 1.2);
+    st.cash = 600;
+    if (d > 1) { const no = Sim.truckGo('maple'); ok(!no.ok && /on the road/.test(no.reason), 'no new plans on the road: ' + no.reason); }
+    cap = capture(['truck:depart', 'truck:arrive', 'truck:day', 'cash']);
+    const c0 = st.cash;
+    runDay((s) => { if (s.today.clock > 1 && !s._probe) { s._probe = 1; ok(!Sim.truckGo('maple').ok, 'trips are planned in the morning only'); } return false; });
+    delete SS.state._probe;
+    cap.stop();
+    const t = SS.state.lastResult.truck, last = d === go.days;
+    ok(t.status === (last ? 'arrived' : 'travelling') && t.city === 'harbor' && t.cups === 0 && t.rent === 0 && t.fuel === (d === 1 ? go.fuel : 0), 'travel day ' + d + ': ' + JSON.stringify(t));
+    ok(cap.of('truck:depart').length === (d === 1 ? 1 : 0) && cap.of('truck:arrive').length === (last ? 1 : 0) && cap.of('truck:day').length === 1, 'depart once, arrive once');
+    ok(Math.abs(SS.state.cash - c0 - sumDelta(cap)) < 0.011, 'travel day cash events add up');
+    ok(SS.state.truck.route === null ? last : SS.state.truck.route.left === go.days - d, 'route counts down');
+    Sim.nextDay();
+  }
+  st = SS.state;
+  ok(st.truck.at === 'harbor' && st.truck.visited.includes('harbor') && st.truck.daysAt === 0, 'arrived in Harbor City');
+  // prices: same bounds as the stand
+  ok(Sim.truckSetPrice(3.333) === 3.35 && Sim.truckSetPrice(999) === D.price.max && Sim.truckSetPrice(-1) === D.price.min && Sim.truckSetPrice(3.5) === 3.5, 'truck price bounds');
+  // a trading day: rent at the start, sales at the end, all of it in DayResult and lifetime sales
+  const harbor = D.byId(D.cities, 'harbor');
+  let tradeDays = 0;
+  for (let n = 0; n < 3; n++) {
+    st = SS.state;
+    wellRun(st, null, 1.2);
+    st.cash = 800; st.reputation = 4;          // a truck owner is well known by now
+    const e = Sim.truckEstimate('harbor'), life0 = st.lifetimeEarnings, best0 = st.stats.bestProfit, daysAt0 = st.truck.daysAt, per = cupCostOf(st) * harbor.supply;
+    ok(e.fuel === 0 && e.days === 0 && Sim.prepInfo().truckRent === harbor.rent, 'estimate where the truck stands');
+    cap = capture(['cash', 'truck:day']);
+    const c0 = st.cash;
+    ok(Sim.startDay().ok && SS.state.cash === r2(c0 - harbor.rent) && cap.of('cash').some((p) => p.reason === 'rent' && p.delta === -harbor.rent), 'truck rent is paid when the day starts');
+    for (let i = 0; i < 20000 && SS.state.phase === 'day'; i++) Sim.update(1 / 30);
+    cap.stop();
+    st = SS.state;
+    const res = st.lastResult, t = res.truck;
+    ok(t.status === 'trading' && t.rent === harbor.rent && t.fuel === 0 && t.revenue === r2(t.cups * 3.5) && Math.abs(t.supplies - t.cups * per) < 0.011 + t.cups * 0.0001 &&
+      t.cups <= D.truck.capacity, 'trading day: ' + JSON.stringify(t));
+    ok(t.cups >= Math.floor(e.cupsLo * 0.9) - 1 && t.cups <= Math.ceil(e.cupsHi * 1.1) + 1, 'the estimate brackets the day: ' + t.cups + ' in ' + e.cupsLo + '-' + e.cupsHi);
+    ok(res.profit === r2(res.standProfit + t.profit) && deq(cap.of('truck:day')[0].result, t), 'DayResult.profit includes the truck, truck:day carries the row');
+    ok(Math.abs(st.lifetimeEarnings - life0 - (res.revenue + res.loyalty + t.revenue)) < 0.05, 'lifetime sales include the truck');
+    ok(st.stats.bestProfit === Math.max(best0, res.standProfit), 'best-day stats stay about the stand');
+    ok(Math.abs(st.cash - c0 - sumDelta(cap)) < 0.011 && res.cashAfter === st.cash, 'trading day cash events add up');
+    ok(st.truck.daysAt === daysAt0 + 1 && st.truck.total.days === ++tradeDays, 'daysAt and total.days count trading days');
+    Sim.nextDay();
+  }
+  st = SS.state;
+  ok(st.truck.total.revenue > 0 && Math.abs(st.truck.total.profit - (st.truck.total.revenue - st.truck.total.costs)) < 0.05, 'truck totals: ' + JSON.stringify(st.truck.total));
+  // crowds thin out the longer it stays, overpricing scares people off
+  Sim.truckSetPrice(1.5);                    // a price the crowd takes in any forecast, so the counts are big enough to compare
+  const e3 = Sim.truckEstimate('harbor');
+  st.truck.daysAt = 0;
+  const e0 = Sim.truckEstimate('harbor');
+  st.truck.daysAt = 20;
+  const eFloor = Sim.truckEstimate('harbor');
+  st.truck.daysAt = 3;
+  ok(e3.cupsHi < e0.cupsHi && Math.abs(eFloor.cupsHi / e0.cupsHi - Sim.TUNE.truckFatFloor) < 0.03, 'fatigue: ' + [e0.cupsHi, e3.cupsHi, eFloor.cupsHi]);
+  Sim.truckSetPrice(12);
+  ok(Sim.truckEstimate('harbor').cupsHi < e3.cupsHi * 0.3, 'a $12 cup barely sells');
+  Sim.truckSetPrice(3.5);
+  // parked: no rent, no sales, the crowd forgets a little
+  ok(Sim.truckSetOpen(false).ok && st.truck.open === false && Sim.prepInfo().truckRent === 0, 'close the truck');
+  wellRun(st, null, 1.2);
+  runDay();
+  ok(SS.state.lastResult.truck.status === 'parked' && SS.state.lastResult.truck.rent === 0 && SS.state.truck.daysAt === 2, 'a parked day: ' + JSON.stringify(SS.state.lastResult.truck));
+  Sim.nextDay();
+  // too poor for the rent: it stays shut, with a toast
+  st = SS.state;
+  Sim.truckSetOpen(true);
+  wellRun(st, null, 1.2);
+  st.cash = harbor.rent - 1;
+  cap = capture(['toast']);
+  runDay();
+  cap.stop();
+  ok(SS.state.lastResult.truck.status === 'parked' && cap.of('toast').some((p) => /stays shut/.test(p.text)), 'no rent money: the truck stays shut');
+  roundTrip('truck results');
+  Sim.nextDay();
+  roundTrip('truck morning');
+  // going home parks it
+  st = SS.state;
+  go = Sim.truckGo('home');
+  ok(go.ok && go.days >= 1 && st.truck.route.to === 'home', 'heading home');
+  for (let d = 1; d <= go.days; d++) { wellRun(SS.state, null, 1.2); runDay(); Sim.nextDay(); }
+  ok(SS.state.truck.at === 'home' && SS.state.truck.route === null, 'back home');
+  wellRun(SS.state, null, 1.2); runDay();
+  ok(SS.state.lastResult.truck.status === 'parked' && SS.state.lastResult.truck.city === 'home', 'parked at home');
+}
+
+/* review fixes: the city forecast can miss, truck rent shows in prep, a below-cost day is paid in full, a cancelled trip is no gift, appeal works on full days */
+{
+  let st = morningOf(9, 30);
+  st.unlockedLocations.push('downtown'); st.cash = 5000; Sim.buyTruck();
+  // forecasts: the real weather once the day is under way; before that it misses now and then, more often further ahead, never by more than one step
+  let miss0 = 0, miss3 = 0, far = 0, n = 0;
+  const ORDER = ['storm', 'rainy', 'cloudy', 'sunny', 'heatwave'];
+  for (let d = 30; d < 630; d++) {
+    st.day = d - 3; n++;
+    const f3 = Sim.cityForecast('harbor', d);                 // seen three days ahead
+    st.day = d;
+    const a = Sim.cityWeather('harbor', d), f = Sim.cityForecast('harbor', d);
+    if (a.type !== f.type) miss0++;
+    if (a.type !== f3.type) miss3++;
+    if (Math.abs(ORDER.indexOf(a.type) - ORDER.indexOf(f.type)) > 1) far++;
+    if (!(f.confidence > 0 && f.confidence <= 1 && f3.confidence <= f.confidence + 1e-9) || (a.type !== f.type && f3.type !== f.type)) far += 100;   // it only firms up
+  }
+  ok(miss0 / n > 0.08 && miss0 / n < 0.3 && miss3 > miss0 && far === 0, 'city forecasts miss sometimes: today ' + miss0 + ', 3 days out ' + miss3 + ' of ' + n + ', far ' + far);
+  st.day = 30; st.phase = 'day';
+  ok(deq(Sim.cityForecast('neon', 30), Object.assign({ confidence: 1 }, Sim.cityWeather('neon', 30))), 'once open, today is the real weather');
+  st.phase = 'prep';
+  // the estimate runs on the forecast and its range is in order even below cost
+  st.truck.at = 'sunport'; st.truck.visited.push('sunport'); st.reputation = 4.5; st.recipe = { lemons: 12, sugar: 12, ice: 5 };
+  Sim.truckSetPrice(0.25);
+  let e = Sim.truckEstimate('sunport');
+  ok(e.lo <= e.hi && e.hi < 0 && e.sure === Sim.cityForecast('sunport', 30).confidence, 'below cost: lo <= hi: ' + JSON.stringify(e));
+  // ... and the day is paid in full: it stops selling when the cash for supplies runs out
+  st.stock = { lemons: 20, sugar: 20, ice: 100, cups: 20 }; st.price = 1;
+  st.cash = D.byId(D.cities, 'sunport').rent;
+  let cap = capture(['cash']);
+  const c0 = st.cash;
+  runDay();
+  cap.stop();
+  let t = SS.state.lastResult.truck;
+  ok(t.status === 'trading' && SS.state.cash >= 0 && Math.abs(SS.state.cash - c0 - sumDelta(cap)) < 0.011 && t.supplies - t.revenue <= c0 - t.rent + SS.state.lastResult.standProfit + 1000,
+    'a below-cost truck day: cash events add up, nothing forgiven: ' + JSON.stringify(t));
+  const rw = SS.state.lastResult.milestones.reduce((a, id) => a + (D.byId(D.milestones, id).reward || 0), 0);
+  ok(Math.abs(SS.state.cash - (c0 + SS.state.lastResult.profit + rw)) < 0.02, 'cash moved by exactly the profit: ' + [c0, SS.state.lastResult.profit, rw, SS.state.cash]);
+  Sim.nextDay();
+  // prep counts the truck's rent, and says when the cart leaves too little for it
+  st = SS.state; st.truck.at = 'neon'; st.truck.visited.push('neon'); st.truck.open = true; Sim.truckSetPrice(5);
+  st.stock = { lemons: 0, sugar: 0, ice: 0, cups: 0 }; st.cash = 1000;
+  let pi = Sim.prepInfo();
+  ok(pi.truckRent === 900 && !pi.truckShut && pi.cashAfter === r2(1000 - pi.rent - 900), 'cash left takes off the truck rent: ' + JSON.stringify(pi));
+  ['lemons', 'sugar', 'ice', 'cups'].forEach((it) => Sim.setCart(it, 30));
+  pi = Sim.prepInfo();
+  ok(pi.truckShut && pi.cashAfter === r2(1000 - pi.cost - pi.rent) && pi.canStart, 'a cart that leaves too little: the truck will stay shut: ' + JSON.stringify(pi));
+  // Grandma does not pay for fuel you can get back
+  st.cart = { lemons: 0, sugar: 0, ice: 0, cups: 0 }; st.truck.at = 'home'; st.truck.route = null; st.cash = 52;
+  let loans = 0; cap = capture(['cash']);
+  Sim.truckGo('maple'); Sim.truckGo('home');
+  cap.stop();
+  ok(st.cash === 52 && !cap.of('cash').some((p) => p.reason === 'loan'), 'planning and cancelling a trip gives nothing: ' + st.cash);
+  Sim.truckGo('maple');
+  ok(/fuel back/.test(Sim.canStartDay().reason), 'stuck with fuel paid: the reason says cancelling gives it back: ' + Sim.canStartDay().reason);
+  Sim.truckGo('home');
+}
+/* stand appeal still counts on a full, busy day (the interest roll is capped at 95%) */
+{
+  const dayAt = (dressed, price) => {
+    let sum = 0;
+    for (const seed of [1, 2, 3, 4]) {
+      const st = morningOf(seed, 40);
+      st.unlockedLocations = D.locations.map((l) => l.id); st.location = 'carnival';
+      st.stock = { lemons: 400, sugar: 400, ice: 4000, cups: 800 }; st.flavors.push('mango'); st.flavor = 'mango';
+      Object.assign(st.upgrades, { pitcher: 3, juicer: 3, helper: 2, speaker: 2, awning: 2, stand: 3, sign: 3 });
+      st.recipe = { lemons: 6, sugar: 5, ice: 2 }; st.price = price; st.cash = 5000; st.reputation = 4.9;
+      if (dressed) { st.custom.owned = ['stand.decor.costume', 'stand.decor.cutout', 'stand.sign.squeezy', 'stand.decor.lights']; st.custom.stand.decor = ['costume', 'cutout', 'lights']; st.custom.stand.sign = 'squeezy'; }
+      Sim.startDay();
+      SS.state.weather = { type: 'cloudy', temp: 20 }; SS.state.today.weatherNow = { type: 'cloudy', temp: 20 };
+      for (let i = 0; i < 20000 && SS.state.phase === 'day'; i++) Sim.update(1 / 30);
+      sum += SS.state.lastResult.standProfit;
+    }
+    return sum / 4;
+  };
+  const plain = dayAt(false, 4.6), dressed = dayAt(true, 4.95);
+  ok(dressed > plain + 20, 'a dressed stand earns more on a busy carnival day: ' + plain.toFixed(0) + ' -> ' + dressed.toFixed(0));
+}
+
+/* city weather: deterministic, leaning to each climate */
+{
+  morningOf(321, 5);
+  const share = (id, types) => { let n = 0; for (let d = 1; d <= 600; d++) if (types.includes(Sim.cityWeather(id, d).type)) n++; return n / 600; };
+  const avgT = (id) => { let s = 0; for (let d = 1; d <= 600; d++) s += Sim.cityWeather(id, d).temp; return s / 600; };
+  ok(deq(Sim.cityWeather('neon', 17), Sim.cityWeather('neon', 17)) && isWx(Sim.cityWeather('neon', 17)), 'cityWeather is deterministic');
+  let differ = 0;
+  for (let d = 1; d <= 30; d++) if (Sim.cityWeather('harbor', d).type !== Sim.cityWeather('capitol', d).type) differ++;
+  ok(differ >= 5, 'cities have their own weather');
+  ok(share('dust', ['heatwave']) > share('pines', ['heatwave']) + 0.15 && share('pines', ['rainy', 'storm']) > share('dust', ['rainy', 'storm']) + 0.1 && avgT('dust') > avgT('pines') + 5,
+    'climates lean: dust hot, pines cool');
+}
+
+/* customisation: buy, equip, decor limit, names, appeal */
+{
+  let st = morningOf(5, 6);
+  st.cash = 1000;
+  ok(Sim.customOwned('stand', 'paint', 'classic') && Sim.customOwned('stand', 'layout', 'flipped') && !Sim.customOwned('stand', 'paint', 'mint'), 'free options are owned');
+  ok(!Sim.customSet('stand', 'paint', 'mint').ok && st.custom.stand.paint === 'classic', 'cannot wear what you do not own');
+  ok(!Sim.customBuy('stand', 'paint', 'bogus').ok && !Sim.customSet('stand', 'bogus', 'x').ok, 'unknown options');
+  let cap = capture(['custom:buy', 'custom:set', 'cash']);
+  const mint = lookDef('stand', 'paint', 'mint').cost;
+  ok(Sim.customBuy('stand', 'paint', 'mint').ok && st.cash === 1000 - mint && st.custom.owned.includes('stand.paint.mint'), 'buy a paint');
+  ok(deq(cap.of('custom:buy')[0], { target: 'stand', slot: 'paint', id: 'mint' }) && cap.of('cash').some((p) => p.reason === 'custom' && p.delta === -mint), 'custom:buy and a cash event');
+  ok(st.custom.stand.paint === 'classic', 'buying does not equip by itself');
+  ok(!Sim.customBuy('stand', 'paint', 'mint').ok, 'no buying twice');
+  ok(Sim.customSet('stand', 'paint', 'mint').ok && st.custom.stand.paint === 'mint' && deq(cap.of('custom:set')[0], { target: 'stand', slot: 'paint', value: 'mint' }), 'equip a paint');
+  cap.stop();
+  let r = Sim.customBuy('stand', 'decor', 'costume');
+  ok(!r.ok && /goal/.test(r.reason), 'the mascot suit needs a goal first: ' + r.reason);
+  st.milestonesDone.push('rep3');
+  ok(Sim.customBuy('stand', 'decor', 'costume').ok, 'the goal unlocks it');
+  r = Sim.customBuy('truck', 'wrap', 'stripes');
+  ok(!r.ok && /truck/.test(r.reason), 'truck looks need the truck: ' + r.reason);
+  st.cash = 5;
+  r = Sim.customBuy('stand', 'decor', 'lights');
+  ok(!r.ok && /more/.test(r.reason) && st.cash === 5, 'too poor: ' + r.reason);
+  st.cash = 1000;
+  ['flowers', 'bunting', 'lights', 'balloons', 'plant'].forEach((id) => ok(Sim.customBuy('stand', 'decor', id).ok, 'buy decor ' + id));
+  ['flowers', 'bunting', 'lights', 'balloons'].forEach((id) => ok(Sim.customSet('stand', 'decor', id).ok, 'hang ' + id));
+  r = Sim.customSet('stand', 'decor', 'plant');
+  ok(!r.ok && deq(st.custom.stand.decor, ['flowers', 'bunting', 'lights', 'balloons']), 'four decorations at most');
+  ok(Sim.customSet('stand', 'decor', 'flowers').ok && Sim.customSet('stand', 'decor', 'plant').ok && deq(st.custom.stand.decor, ['bunting', 'lights', 'balloons', 'plant']), 'decor toggles');
+  ok(Sim.customAppeal('stand') === 0.1, 'appeal adds up: ' + Sim.customAppeal('stand'));
+  ['sign.squeezy', 'layout.showcase'].forEach((k) => { const [slot, id] = k.split('.'); Sim.customBuy('stand', slot, id); Sim.customSet('stand', slot, id); });
+  ok(Sim.customAppeal('stand') === 0.15, 'appeal ' + Sim.customAppeal('stand'));
+  Sim.customSet('stand', 'decor', 'plant'); Sim.customSet('stand', 'decor', 'costume');
+  ok(Sim.customAppeal('stand') === D.custom.appealCap, 'appeal is capped');
+  // names
+  const name = (t, v) => { Sim.customSet(t, 'name', v); return SS.state.custom[t].name; };
+  ok(name('stand', "  joe's  <lemon> stand!!! ") === "JOE'S LEMON ST" && name('stand', '@@@') === 'LEMONADE' && name('truck', 'émile ✓  truck') === 'MILE TRUCK' &&
+    name('truck', 'x'.repeat(40)) === 'X'.repeat(D.custom.nameMax.truck), 'names are cleaned: ' + JSON.stringify(SS.state.custom));
+  roundTrip('custom morning');
+  st = SS.state;
+  // shop rules: buying waits for the shop, wearing does not
+  wellRun(st, null, 1.2);
+  runDay((s) => {
+    if (s.today.clock > 2 && !s._probe) {
+      s._probe = 1;
+      ok(!Sim.customBuy('stand', 'paint', 'sky').ok && Sim.customSet('stand', 'decor', 'lights').ok, 'no shopping mid-day, but the look can change');
+    }
+    return false;
+  });
+  delete SS.state._probe;
+  // the look brings people in the way stand upgrades do
+  const interested = (seed, look) => {
+    let n = 0;
+    for (let day = 4; day <= 9; day++) {
+      const s = morningOf(seed, day);
+      wellRun(s, null, 1.2);
+      if (look) { s.custom.owned = ['stand.decor.costume', 'stand.decor.cutout', 'stand.sign.squeezy', 'stand.paint.squeezy']; s.custom.stand.decor = ['costume', 'cutout']; s.custom.stand.sign = 'squeezy'; s.custom.stand.paint = 'squeezy'; }
+      runDay();
+      const p = SS.state.lastResult.people;
+      n += p.served + p.pricey + p.wait + p.soldout + p.quit;
+    }
+    return n;
+  };
+  let plain = 0, dressed = 0;
+  [3, 8, 13].forEach((seed) => { plain += interested(seed, false); dressed += interested(seed, true); });
+  ok(dressed > plain * 1.05, 'a dressed-up stand draws more customers: ' + plain + ' -> ' + dressed);
+}
+
+/* "Mom Got Groceries!" */
+{
+  const G = D.groceries;
+  // how often she comes, over long chains (her gap depends on her last run)
+  let hits = 0, days = 0, worstGap = 99;
+  for (let seed = 1; seed <= 25; seed++) {
+    disk.clear(); Sim.newGame(seed);
+    let last = 0;
+    for (let d = 1; d <= 60; d++) {
+      const st = SS.state;
+      st.stock = { lemons: 50, sugar: 50, ice: 300, cups: 100 };
+      ok(Sim.startDay().ok, 'grocery chain day');
+      const g = st.today.groceries;
+      days++;
+      if (g) {
+        hits++;
+        ok(d >= G.firstDay && (!last || d - last >= G.gap), 'Mom too soon: day ' + d + ' after ' + last);
+        if (last) worstGap = Math.min(worstGap, d - last);
+        ok(g.at >= 0.2 * SS.DAY_LENGTH && g.at <= 0.7 * SS.DAY_LENGTH && g.eta === G.eta && g.done === false, 'grocery timing ' + JSON.stringify(g));
+        const kinds = ITEMS.filter((it) => g.items[it] > 0);
+        ok(kinds.length >= 2 && kinds.every((it) => Number.isInteger(g.items[it]) && g.items[it] >= G.items[it][0] && g.items[it] <= G.items[it][1]), 'grocery bags ' + JSON.stringify(g.items));
+        st.today.clock = g.at - 0.01;
+        Sim.update(0.05);
+        ok(g.done && st.groceriesLast === d, 'delivered on the clock');
+        last = d;
+      }
+      Sim.closeEarly();
+      ok(deq(SS.state.lastResult.groceries, g ? g.items : null), 'DayResult.groceries');
+      Sim.nextDay();
+    }
+  }
+  const rate = hits / days;
+  console.log('\nMom Got Groceries: ' + hits + ' runs in ' + days + ' days (' + (100 * rate).toFixed(1) + '%), shortest gap ' + worstGap + ' days');
+  ok(rate > 0.06 && rate < 0.13 && worstGap >= G.gap, 'Mom comes about every 8-14 days: ' + rate.toFixed(3));
+
+  // one run in detail: a sold-out stand is back in business, at any speed, never while paused
+  let found = null;
+  for (let seed = 1; seed < 400 && !found; seed++) {
+    const st = morningOf(seed, 6);
+    st.stock = { lemons: 3, sugar: 300, ice: 3000, cups: 600 };
+    Sim.startDay();
+    const g = SS.state.today.groceries;
+    if (g && g.items.lemons > 0 && g.at > 25) found = seed;
+    Sim.closeEarly();
+  }
+  ok(!!found, 'some seed brings lemons on day 6');
+  [1 / 30, 0.1].forEach((dt) => {
+    const st = morningOf(found, 6);
+    wellRun(st, null, 1.0);
+    st.stock.lemons = 0.6;                     // enough to open
+    const cap = capture(['groceries:incoming', 'groceries', 'soldout']);
+    let warnAt = -1, landAt = -1, snap = null, before = null;
+    const fn = SS.on('groceries', () => { landAt = SS.state.today.clock; snap = { stock: Object.assign({}, SS.state.stock), soldOut: SS.state.today.soldOut }; });
+    const fw = SS.on('groceries:incoming', () => { warnAt = SS.state.today.clock; });
+    Sim.startDay();
+    SS.state.weather = { type: 'sunny', temp: 26 }; SS.state.today.weatherNow = { type: 'sunny', temp: 26 };
+    SS.state.stock.lemons = 0;                 // the first pitcher finds no lemons: sold out from the start
+    const g = SS.state.today.groceries;
+    for (let i = 0; i < 20000 && SS.state.phase === 'day'; i++) {
+      if (!g.done) {
+        before = Object.assign({}, SS.state.stock);
+        const c0 = SS.state.today.clock;
+        Sim.update(0);
+        ok(SS.state.today.clock === c0 && !g.done, 'paused: nothing moves');
+      }
+      Sim.update(dt);
+    }
+    SS.off('groceries', fn); SS.off('groceries:incoming', fw);
+    cap.stop();
+    ok(cap.of('soldout').length >= 1 && cap.of('soldout')[0].missing === 'lemons', 'the stand ran out of lemons first');
+    ok(cap.of('groceries:incoming').length === 1 && Math.abs(cap.of('groceries:incoming')[0].eta - g.eta) <= dt + 1e-6 && warnAt >= g.at - g.eta && warnAt < g.at - g.eta + dt + 1e-6, 'incoming ' + g.eta + 's ahead (dt ' + dt + ')');
+    ok(cap.of('groceries').length === 1 && landAt >= g.at && landAt < g.at + dt + 1e-6 && deq(cap.of('groceries')[0].items, g.items), 'the bags land on time');
+    ok(!!snap && ITEMS.every((it) => Math.abs(snap.stock[it] - before[it] - g.items[it]) < 1e-6) && snap.soldOut === null, 'stock goes up by the bags and sold-out clears');
+    ok(SS.state.lastResult.groceries && deq(SS.state.lastResult.groceries, g.items) && SS.state.groceriesLast === 6, 'DayResult.groceries and groceriesLast');
+    ok(SS.state.lastResult.cups > 2, 'the stand sold again after Mom came: ' + SS.state.lastResult.cups);
+    // her gap: none of the next few mornings
+    for (let d = 1; d < G.gap; d++) { Sim.nextDay(); wellRun(SS.state, null, 1.0); Sim.startDay(); ok(SS.state.today.groceries === null, 'no groceries ' + d + ' days after'); Sim.closeEarly(); }
+  });
+  // a hand-set run (debug 'groceries') is announced and delivered the same way
+  const st = morningOf(9, 4);
+  wellRun(st, null, 1.0);
+  Sim.startDay();
+  for (let i = 0; i < 30; i++) Sim.update(1 / 30);
+  const t0 = SS.state.today.clock, cap = capture(['groceries:incoming', 'groceries']);
+  SS.state.today.groceries = { at: t0 + 3, eta: G.eta, done: false, items: { lemons: 50, sugar: 0, ice: 100, cups: 0 } };
+  for (let i = 0; i < 120; i++) Sim.update(1 / 30);
+  cap.stop();
+  ok(cap.of('groceries:incoming').length === 1 && Math.abs(cap.of('groceries:incoming')[0].eta - 3) < 0.05 && cap.of('groceries').length === 1, 'a forced run 3 s out');
+  Sim.closeEarly();
 }
 
 /* every documented event fired at least once somewhere */

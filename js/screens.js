@@ -246,17 +246,21 @@
     prep.cupsWord = h('strong', null, 'cups you can make');
     prep.limit = h('span', { class: 'prep-sum-limit' });
     prep.sumCost = h('dd', { class: 'num' }); prep.sumRentL = h('dt'); prep.sumRent = h('dd', { class: 'num' }); prep.sumLeft = h('dd', { class: 'num' });
+    prep.sumTruckL = h('dt'); prep.sumTruck = h('dd', { class: 'num' }); prep.sumTruckRow = h('div', { hidden: true }, prep.sumTruckL, prep.sumTruck);
     prep.boosts = h('div', { class: 'prep-boosts', role: 'list', 'aria-label': 'Boosts working for you today', hidden: true });
     var sum = h('section', { class: 'well prep-sum prep-in', style: '--i:6' },
       h('div', { class: 'prep-sum-cups' }, h('span', { class: 'prep-sum-ico', html: SS.icon('pitcher') }), prep.cups, h('div', { class: 'prep-sum-text' }, prep.cupsWord, prep.limit)),
       h('dl', { class: 'prep-sum-rows' },
         h('div', null, h('dt', null, 'Shopping'), prep.sumCost),
         h('div', null, prep.sumRentL, prep.sumRent),
+        prep.sumTruckRow,
         h('div', { class: 'prep-sum-total' }, h('dt', null, 'Cash left after'), prep.sumLeft)),
       prep.boosts);
 
     body.append(h('div', { class: 'prep' }, head,
       h('div', { class: 'prep-cols' }, h('div', { class: 'prep-col' }, forecast, news, market), h('div', { class: 'prep-col' }, recipe, price, sum))));
+    prep.truck = safe('truck card', truckPrepSlot);
+    if (prep.truck) (news || forecast).after(prep.truck.el);
 
     /* footer */
     prep.reasonText = h('span');
@@ -272,7 +276,7 @@
     prep.deals.hidden = true;
     prep.deals.append(h('i', { class: 'prep-deals-badge', 'aria-hidden': 'true' }));
     prep.foot = h('div', { class: 'prep-foot' }, h('div', { class: 'prep-foot-in' }, prep.reason,
-      h('div', { class: 'prep-foot-row' }, navBtn('shop', 'Shop', 'shop'), navBtn('map', 'Map', 'map'), prep.deals, prep.go)));
+      h('div', { class: 'prep-foot-row' }, navBtn('shop', 'Shop', 'shop'), navBtn('map', 'Map', 'map'), navBtn('custom', 'Style', 'brush'), prep.deals, prep.go)));
     foot.append(prep.foot);
 
     patchPrep();
@@ -315,7 +319,8 @@
     }
 
     D.itemOrder.forEach(function (id) {
-      var row = prep.items[id], it = D.items[id], cart = num(st.cart[id]), more = Math.floor((info.cashAfter + 1e-6) / row.price);
+      // the stand's budget: the truck's rent is not held back, the summary says when the cart leaves it parked
+      var row = prep.items[id], it = D.items[id], cart = num(st.cart[id]), more = Math.floor((info.cashAfter + (info.truckShut ? 0 : num(info.truckRent)) + 1e-6) / row.price);
       var max = SS.clamp(cart + more, cart, 99);
       row.stepper.set(cart, max);
       txt(row.stock, int(Math.floor(num(st.stock[id]) + 1e-9)));
@@ -348,6 +353,10 @@
     txt(prep.sumCost, info.cost > 0 ? '-' + money(info.cost) : money(0));
     txt(prep.sumRentL, 'Rent at ' + loc.name);
     txt(prep.sumRent, info.rent > 0 ? '-' + money(info.rent) : 'Free');
+    prep.sumTruckRow.hidden = !(num(info.truckRent) > 0);
+    txt(prep.sumTruckL, 'Truck rent in ' + (info.truckCity || 'town'));
+    txt(prep.sumTruck, info.truckShut ? 'Short: it stays shut' : '-' + money(num(info.truckRent)));
+    cls(prep.sumTruck, 'bad', !!info.truckShut);
     txt(prep.sumLeft, money(info.cashAfter));
     cls(prep.sumLeft, 'bad', info.cashAfter < -0.004);
 
@@ -357,6 +366,7 @@
     txt(prep.reasonText, ok ? int(info.maxCups) + ' ' + plural(info.maxCups, 'cup') + ' ready to sell at ' + money(st.price) + ' each.' : info.reason || 'Not ready yet.');
     cls(prep.reason, 'is-ok', ok);
     patchPrepDex(st);
+    if (prep.truck) safe('truck card', prep.truck.refresh);
   }
 
   /** the Deals button (with a badge while a limited edition is unsold) and today's boost chips */
@@ -515,7 +525,7 @@
     /* hero + tally */
     var profit = r.profit, tone = profit > 0.004 ? 'good' : profit < -0.004 ? 'bad' : '';
     var heroN = h('strong', { class: 'display num res-hero-n ' + tone + (money(profit).length > 8 ? ' is-long' : '') }, money(0));
-    var ribbon = r.bestDay ? h('span', { class: 'res-ribbon' }, I('medal'), 'Best day yet') : null;
+    var ribbon = r.bestDay && profit > 0.004 ? h('span', { class: 'res-ribbon' }, I('medal'), 'Best day yet') : null;
     var hero = h('div', { class: 'res-hero-top' }, h('span', { class: 'label' }, tone === 'bad' ? 'Today\'s loss' : tone === 'good' ? 'Today\'s profit' : 'You broke even'), heroN, ribbon);
     var tally = h('dl', { class: 'res-tally' });
     var rows = [
@@ -531,15 +541,18 @@
       return h('div', { class: 'res-row' }, h('dt', null, I(d[0]), d[1], dots), h('dd', { class: 'num ' + d[3] }, d[2]));
     });
     var totalRow = h('div', { class: 'res-row res-row--total' }, h('dt', null, tone === 'bad' ? 'Loss' : 'Profit'), h('dd', { class: 'num ' + tone }, money(profit)));
+    var truckRows = safe('truck results', function () { return truckResultRows(raw, st); }) || [];
+    if (truckRows.length) { rows = rows.concat(truckRows); totalRow.firstChild.textContent = tone === 'bad' ? 'Total loss' : 'Total profit'; }
     res.cash = h('b', { class: 'num' }, money(st.cash));
     var cashLine = h('p', { class: 'res-cash' }, I('cash'), 'Cash on hand ', res.cash);
     rows.concat([totalRow]).forEach(function (el) { tally.append(el); });
     var heroBox = h('section', { class: 'panel res-hero res-hero--' + (tone || 'even') }, hero, tally, cashLine);
+    hero.append(squeezyReact(r, raw));
     step(heroBox, 260, function (instant) {
       SS.countTo(heroN, profit, { from: 0, ms: instant ? 0 : 1000 });
       if (!instant) SS.sfx('whoosh');
     }, hero);
-    rows.forEach(function (el) { step(el, 190, function (instant) { if (!instant) SS.sfx('tally'); }); });
+    rows.forEach(function (el) { step(el, 190, function (instant) { if (!instant) SS.sfx('tally'); if (el._in) el._in(instant); }); });
     step(totalRow, 240, function (instant) { if (!instant) { SS.sfx('tally'); restart(heroN, 'res-pop'); } });
     if (ribbon) step(ribbon, 200);
     step(cashLine, 260);
@@ -1193,6 +1206,782 @@
   }
 
   /* ------------------------------------------------------------------ *
+   * FOOD TRUCK: showroom, campaign map, the prep card and the results lines.
+   * Talks to the truck API in the core.js contract; every call is guarded so these screens
+   * still open (with dashes) while that API is missing.
+   * ------------------------------------------------------------------ */
+  var MAP_W = 400, MAP_H = 260;
+  var LAND = 'M30 40C60 18 130 22 170 14S280 20 320 26 385 50 372 80 382 120 372 150 350 205 330 222 250 246 210 240 130 250 95 240 30 214 26 180 34 130 26 104 12 58 30 40Z';
+  var TRUCK_SAYS = { trading: 'Trading', travelling: 'On the road', arrived: 'Arrived', parked: 'Parked' };
+  var campSel = null;     // the city picked on the campaign map; kept between visits
+
+  function initials(name) { return String(name).split(' ').map(function (w) { return w.charAt(0); }).join('').slice(0, 2); }
+  function truckOf(st) { return st && st.truck && typeof st.truck === 'object' ? st.truck : null; }
+  function cityOf(id) { return (D.cities && D.byId(D.cities, id)) || null; }
+  function call(name) {
+    var S = sim(), args = Array.prototype.slice.call(arguments, 1);
+    return S && typeof S[name] === 'function' ? safe(name, function () { return S[name].apply(S, args); }) : undefined;
+  }
+  function truckLook(st) { var c = st && st.custom; return (c && c.truck) || (D.customDefaults ? D.customDefaults().truck : {}); }
+  /** the forecast for a town (it can miss, like the stand's); the real weather once the day is under way */
+  function cityWx(id, day) {
+    var w = call('cityForecast', id, day) || call('cityWeather', id, day), type = w && D.weather[w.type] ? w.type : null;
+    return type ? { type: type, temp: num(w.temp) || D.weather[type].temp[0], sure: w.confidence != null ? SS.clamp(num(w.confidence), 0, 1) : 1 } : null;
+  }
+  /** the trip to `id` plus a day of trading there; days and fuel fall back to the contract formula while truckEstimate is missing */
+  function tripTo(id) {
+    var e = call('truckEstimate', id);
+    if (e && typeof e === 'object') return e;
+    var tr = truckOf(SS.state), a = cityOf((tr && tr.at) || 'home'), b = cityOf(id), T = D.truck || {};
+    if (!a || !b) return null;
+    var dist = Math.hypot(a.x - b.x, a.y - b.y);
+    return { days: dist ? Math.max(1, Math.ceil(dist / (T.mapPerDay || 0.32))) : 0, fuel: dist * (T.fuelPerMap || 180), rent: b.rent };
+  }
+  function travelling(tr) { return !!(tr && tr.route && cityOf(tr.route.to)); }
+  /** where the truck is, in words (prep card, campaign bar, screen readers) */
+  function truckLine(st, tr) {
+    var r = tr.route, to = travelling(tr) && cityOf(r.to), at = cityOf(tr.at) || cityOf('home');
+    if (to) {
+      var left = Math.max(0, Math.round(num(r.left)));
+      if (st.phase === 'prep' && left >= num(r.total)) return 'Leaves for ' + to.name + ' when you open';
+      return 'On the road to ' + to.name + ', ' + left + ' ' + plural(left, 'day') + ' left';
+    }
+    if (!at || at.id === 'home') return 'Parked next to your stand';
+    return (tr.open ? 'Trading at ' : 'Parked at ') + at.name;
+  }
+  /** the truck's spot on the map (0..1) and which way it faces; moves along the route through the day while travelling */
+  function truckSpot(st, tr) {
+    var at = cityOf(tr.at) || cityOf('home');
+    if (!travelling(tr)) return { x: at.x, y: at.y, flip: false, parked: true };
+    var r = tr.route, a = cityOf(r.from) || at, b = cityOf(r.to), tot = Math.max(1, num(r.total));
+    var done = tot - SS.clamp(num(r.left), 0, tot) + (st.phase === 'day' && st.today ? SS.clamp(num(st.today.t), 0, 1) : 0);
+    var p = arcPt(a, b, SS.clamp(done / tot, 0, 1));
+    return { x: p.x, y: p.y, flip: b.x < a.x, parked: false };
+  }
+  /** a gentle bow between two cities, so routes read as roads rather than rulers */
+  function arcCtl(a, b) { return { x: (a.x + b.x) / 2 - (b.y - a.y) * 0.16, y: (a.y + b.y) / 2 + (b.x - a.x) * 0.16 }; }
+  function arcPt(a, b, k) {
+    var c = arcCtl(a, b), u = 1 - k;
+    return { x: u * u * a.x + 2 * u * k * c.x + k * k * b.x, y: u * u * a.y + 2 * u * k * c.y + k * k * b.y };
+  }
+  function arcD(a, b) {
+    var c = arcCtl(a, b);
+    return 'M' + (a.x * MAP_W).toFixed(1) + ' ' + (a.y * MAP_H).toFixed(1) + 'Q' + (c.x * MAP_W).toFixed(1) + ' ' + (c.y * MAP_H).toFixed(1) + ' ' + (b.x * MAP_W).toFixed(1) + ' ' + (b.y * MAP_H).toFixed(1);
+  }
+  /** the country: sea, land, a desert, mountains, a forest, a lake, and roads to each town's two nearest neighbours */
+  function mapSvg() {
+    var K = '#1b1f3b', roads = '', seen = {};
+    D.cities.forEach(function (a) {
+      D.cities.filter(function (b) { return b !== a; }).sort(function (p, q) { return Math.hypot(p.x - a.x, p.y - a.y) - Math.hypot(q.x - a.x, q.y - a.y); })
+        .slice(0, 2).forEach(function (b) {
+          var k = [a.id, b.id].sort().join('-');
+          if (!seen[k]) { seen[k] = 1; roads += '<path d="' + arcD(a, b) + '"/>'; }
+        });
+    });
+    var wave = function (x, y) { return '<path d="M' + x + ' ' + y + 'q5-5 10 0t10 0"/>'; };
+    var peak = function (x, y, s) { return '<path d="M' + x + ' ' + y + 'l' + 16 * s + '-26' + 'l' + 16 * s + ' 26z" fill="#aab1d8"/><path d="M' + (x + 10 * s) + ' ' + (y - 16) + 'l' + 6 * s + '-10l' + 6 * s + ' 10l-3 2-3-2-3 2z" fill="#fff" stroke-width="2"/>'; };
+    var tree = function (x, y) { return '<circle cx="' + x + '" cy="' + y + '" r="7" fill="#35c977"/>'; };
+    return '<svg class="camp-svg" viewBox="0 0 ' + MAP_W + ' ' + MAP_H + '" aria-hidden="true" stroke="' + K + '" stroke-linecap="round" stroke-linejoin="round" fill="none">' +
+      '<rect x="-4" y="-4" width="408" height="268" fill="#8fd3ff" stroke="none"/>' +
+      '<g stroke="#fff" stroke-width="2.5" opacity=".7">' + wave(372, 16) + wave(8, 232) + wave(372, 238) + wave(6, 128) + wave(196, 252) + '</g>' +
+      '<path d="' + LAND + '" transform="translate(0 6)" fill="' + K + '" opacity=".16" stroke="none"/>' +
+      '<path d="' + LAND + '" fill="#c8f0d2" stroke-width="3"/>' +
+      '<ellipse cx="92" cy="182" rx="50" ry="34" fill="#ffe9a6" stroke="none"/>' +
+      '<g stroke="#e0b34a" stroke-width="2.5"><path d="M62 186q8-5 16 0M98 200q8-5 16 0M104 166q8-5 16 0"/></g>' +
+      '<g stroke-width="2.5">' + peak(92, 72, 1) + peak(150, 66, 1) + peak(176, 74, 0.8) + '</g>' +
+      '<g stroke-width="2.5">' + tree(276, 122) + tree(289, 114) + tree(266, 132) + tree(214, 76) + tree(225, 70) + '</g>' +
+      '<path d="M320 152Q350 162 372 152" stroke-width="7"/><path d="M320 152Q350 162 372 152" stroke="#8fd3ff" stroke-width="3"/>' +
+      '<ellipse cx="300" cy="150" rx="22" ry="12" fill="#8fd3ff" stroke-width="2.5"/>' +
+      '<g class="camp-roads" stroke="#fff" stroke-width="3" stroke-dasharray="1 7">' + roads + '</g>' +
+      '<path class="camp-trip" d="" stroke="' + K + '" stroke-width="7"/><path class="camp-trip camp-trip-in" d="" stroke="#ff6257" stroke-width="3.5"/>' +
+      '<path class="camp-plan" d="" stroke="' + K + '" stroke-width="3" stroke-dasharray="8 7"/>' +
+      '<g transform="translate(378 212)" stroke-width="2.5"><circle r="12" fill="#fff"/><path d="M0-9l4 9-4 9-4-9z" fill="#ff6257"/>' +
+      '<path d="M-3 -19v-6l6 6v-6" stroke-width="2"/></g>' +
+      '</svg>';
+  }
+
+  /** size the canvas backing store to its CSS box (only when that changes) and return a cleared, dpr-scaled context */
+  function fitCanvas(cv) {
+    var w = cv.clientWidth, hh = cv.clientHeight, dpr = Math.min(2, window.devicePixelRatio || 1);
+    if (!w || !hh) return null;
+    if (cv._w !== w || cv._h !== hh || cv._d !== dpr) { cv._w = w; cv._h = hh; cv._d = dpr; cv.width = Math.round(w * dpr); cv.height = Math.round(hh * dpr); }
+    var ctx = cv._ctx || (cv._ctx = cv.getContext('2d'));
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, hh);
+    return ctx;
+  }
+  function paintPostcard(cv, cityId, t, wx) {
+    var ctx = fitCanvas(cv), V = SS.Vehicles, look = truckLook(SS.state);
+    if (!ctx) return;
+    if (V && V.drawPostcard) V.drawPostcard(ctx, cv._w, cv._h, cityId, t, look, { weather: wx, reduced: SS.reduced() });
+  }
+  /** one rAF loop per open campaign modal; it ends by itself once the modal leaves the page, and runs a single frame when motion is reduced */
+  function campLoop(root, paint) {
+    var still = SS.reduced();
+    function frame(now) {
+      if (!root.isConnected) return;
+      safe('campaign frame', function () { paint(still ? 0 : now / 1000); });
+      if (!still) requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  }
+
+  /** Open / Park: a switch that shows its state in words */
+  function openSwitch() {
+    var t = h('span', { class: 'camp-switch-t' });
+    var b = h('button', { class: 'camp-switch', type: 'button', role: 'switch', 'aria-label': 'Truck open for trade', onclick: function () {
+      var tr = truckOf(SS.state);
+      if (!tr || b.disabled) return;
+      SS.sfx('click');
+      var r = call('truckSetOpen', !tr.open);
+      if (r && r.ok === false) { SS.sfx('error'); if (r.reason && SS.UI && SS.UI.toast) SS.UI.toast(r.reason, 'info', 'truck'); }
+      onChange();
+    } }, h('i', { class: 'camp-switch-knob', 'aria-hidden': 'true' }), t);
+    b.set = function (tr, can) { var on = !!tr.open; b.setAttribute('aria-checked', String(on)); txt(t, on ? 'Open for trade' : 'Parked'); b.disabled = !can; };
+    return b;
+  }
+  /** the truck's own cup price, with the stand price's hold-to-repeat stepper; a disabled fieldset locks it outside prep */
+  function truckPriceBox(tr) {
+    var P = D.price, s = SS.stepper({ value: num(tr.price) || (D.truck && D.truck.priceStart) || P.start, min: P.min, max: P.max, step: P.step, fmt: money, label: 'truck price per cup',
+      onChange: function (v) { call('truckSetPrice', v); onChange(); } });
+    var fs = h('fieldset', { class: 'camp-fs' }, s);
+    fs.set = function (tr2, can) { fs.disabled = !can; if (num(tr2.price) && Math.abs(s.get() - num(tr2.price)) > 1e-9) s.set(num(tr2.price)); };
+    return fs;
+  }
+  function planNote(st) {
+    return st.phase === 'prep' ? '' : st.phase === 'day' ? 'The truck\'s plans are set for today. Pick a new town, price or open and park it tomorrow morning, before you open.'
+      : 'Plan the truck\'s next move in the morning, before you open the stand.';
+  }
+
+  /* ---- showroom (before you own it) ---- */
+  function buildShowroom(onBought) {
+    var T = D.truck || {}, cost = num(T.cost), loc = D.byId(D.locations, T.unlockLocation);
+    var cv = h('canvas', { class: 'camp-cv' });
+    var why = h('p', { class: 'shop-why', role: 'alert', hidden: true });
+    var reqU = reqChip('lock', ''), reqC = reqChip('coin', '');
+    reqU.classList.add('camp-req'); reqC.classList.add('camp-req');
+    var btn = h('button', { class: 'btn btn--go btn--lg camp-buy', type: 'button', onclick: buy }, 'Buy for ' + moneyShort(cost));
+    var card = h('article', { class: 'panel camp-show' },
+      h('div', { class: 'camp-show-art' }, cv),
+      h('div', { class: 'camp-show-main' },
+        h('span', { class: 'label' }, 'For sale'),
+        h('h3', { class: 'display camp-show-title' }, 'A food truck of your own'),
+        h('p', { class: 'camp-show-p' }, 'A second business on wheels. Drive it from town to town, sell where people are thirsty, and pay each town\'s rent on the days you trade.'),
+        h('ul', { class: 'camp-show-facts' },
+          h('li', null, I('cup'), 'Sells up to ' + int(T.capacity || 0) + ' cups a day with your recipe and flavor'),
+          h('li', null, I('pin'), int(D.cities.length - 1) + ' towns, from quiet Maple Falls to glittering Neon Bay'),
+          h('li', null, I('tag'), 'Its own cup price: crowds in big cities pay more')),
+        h('div', { class: 'camp-show-buy' },
+          h('div', { class: 'camp-show-price' }, h('span', { class: 'label' }, 'Price'), h('b', { class: 'display num' }, moneyShort(cost))),
+          h('div', { class: 'camp-show-reqs' }, reqU, reqC), btn),
+        why),
+      stampEl());
+    function buy() {
+      var st = SS.state;
+      if (!call('truckUnlocked')) { refuse(card, why, 'Unlock ' + (loc ? loc.name : 'a bigger spot') + ' or sell ' + moneyShort(T.unlockLifetime) + ' in total first.'); return; }
+      if (num(st.cash) + 1e-9 < cost) { refuse(card, why, 'You need ' + money(cost - num(st.cash)) + ' more.'); return; }
+      var ask = SS.UI && SS.UI.confirm ? SS.UI.confirm({ title: 'Buy the food truck?', text: 'It costs ' + money(cost) + '. You will have ' + money(num(st.cash) - cost) + ' left for the stand.', yes: 'Buy it', no: 'Not yet' }) : Promise.resolve(true);
+      Promise.resolve(ask).then(function (yes) {
+        if (!yes) return;
+        var r = call('buyTruck');
+        if (r && r.ok) { why.hidden = true; stamp(card, 'Yours!'); onBought(); } else refuse(card, why, (r && r.reason) || 'The truck is not for sale right now.');
+        onChange();
+      });
+    }
+    return {
+      el: h('div', { class: 'camp-shop' }, card),
+      refresh: function (st) {
+        var un = !!call('truckUnlocked');
+        reqU.set(un, un ? 'Unlocked' : 'Unlock ' + (loc ? loc.name : 'a bigger spot') + ' or sell ' + moneyShort(T.unlockLifetime) + ' in total');
+        reqC.set(num(st.cash) + 1e-9 >= cost, moneyShort(cost) + ' in cash');
+        btn.setAttribute('aria-disabled', un && num(st.cash) + 1e-9 >= cost ? 'false' : 'true');
+      },
+      frame: function (t) { paintPostcard(cv, 'home', t, null); }
+    };
+  }
+
+  /* ---- the campaign (once you own it) ---- */
+  function campaignView() {
+    var st0 = SS.state, tr0 = truckOf(st0);
+    if (!cityOf(campSel)) campSel = (travelling(tr0) && tr0.route.to) || tr0.at || 'home';
+    var maxT = 1, maxD = 1, maxP = 1;
+    D.cities.forEach(function (c) { maxT = Math.max(maxT, c.traffic); maxD = Math.max(maxD, c.demand); maxP = Math.max(maxP, c.tolerance); });
+
+    /* status bar */
+    var statusT = h('strong', { class: 'camp-status-t' }), statusS = h('span', { class: 'camp-status-s' });
+    var sw = openSwitch(), price = truckPriceBox(tr0);
+    var homeT = h('span'), homeBtn = h('button', { class: 'btn btn--sm camp-home', type: 'button', onclick: function () { campSel = 'home'; go('home'); } }, I('home'), homeT);
+    var note = h('p', { class: 'camp-note', hidden: true }, I('info'), h('span'));
+    var bar = h('section', { class: 'panel camp-bar' },
+      h('div', { class: 'camp-status' }, h('span', { class: 'camp-status-ico', html: SS.icon('truck') }), h('div', { class: 'camp-status-text' }, statusT, statusS)),
+      h('div', { class: 'camp-ctl' }, sw, h('div', { class: 'camp-price' }, h('span', { class: 'label' }, 'Cup price'), price), homeBtn));
+
+    /* map */
+    var map = h('div', { class: 'camp-map', role: 'group', 'aria-label': 'Map of the country. Pick a town to see what trading there is like.', html: mapSvg() });
+    var plan = map.querySelector('.camp-plan'), trips = map.querySelectorAll('.camp-trip');
+    var marker = h('span', { class: 'camp-marker', 'aria-hidden': 'true' }, h('span', { class: 'camp-marker-in', html: SS.icon('truck') }));
+    var pins = {};
+    D.cities.forEach(function (c) {
+      var b = h('button', { class: 'camp-pin' + (c.id === 'home' ? ' is-home' : ''), type: 'button', style: 'left:' + (c.x * 100).toFixed(2) + '%;top:' + (c.y * 100).toFixed(2) + '%',
+        onclick: function () { if (campSel !== c.id) { SS.sfx('click'); campSel = c.id; refresh(); } } },
+        h('span', { class: 'camp-pin-dot', html: SS.icon(c.id === 'home' ? 'stand' : 'pin') }), h('span', { class: 'camp-pin-l' }, c.name),
+        h('span', { class: 'camp-pin-s', 'aria-hidden': 'true' }, initials(c.name)));   // the short tag a narrow map shows instead
+      pins[c.id] = b; map.append(b);
+    });
+    map.append(marker);
+
+    /* the picked town */
+    var cv = h('canvas', { class: 'camp-cv' });
+    var dTag = h('span', { class: 'chip camp-city-tag', hidden: true });
+    var dName = h('h3', { class: 'display camp-city-name' }), dBlurb = h('p', { class: 'camp-city-blurb' });
+    var dStats = h('dl', { class: 'camp-stats' }), dWx = h('div', { class: 'camp-wx' }), dEst = h('div', { class: 'camp-est' });
+    var goT = h('span'), goBtn = h('button', { class: 'btn btn--go camp-go', type: 'button', onclick: function () { go(campSel); } }, I('truck'), goT);
+    var why = h('p', { class: 'shop-why', role: 'alert', hidden: true });
+    var detail = h('section', { class: 'panel camp-city', 'aria-label': 'Town details' },
+      h('div', { class: 'camp-postcard' }, cv, dTag),
+      h('div', { class: 'camp-city-body' }, dName, dBlurb, dStats, dWx, dEst, goBtn, why), stampEl());
+
+    /* campaign book */
+    var totals = h('dl', { class: 'camp-totals' }), stamps = h('ul', { class: 'camp-stamps' });
+    var book = h('section', { class: 'camp-book' },
+      h('div', { class: 'camp-book-part' }, h('h3', { class: 'display res-sec-title' }, I('chart'), 'Campaign so far'), totals),
+      h('div', { class: 'camp-book-part' }, h('h3', { class: 'display res-sec-title' }, I('pin'), 'Towns visited'), stamps));
+
+    function go(id) {
+      var r = call('truckGo', id);
+      if (r && r.ok) { why.hidden = true; stamp(detail, id === 'home' ? 'Heading home!' : 'Road trip!'); }
+      else refuse(detail, why, (r && r.reason) || 'The truck cannot set off right now.');
+      onChange();
+    }
+    var keys = {};
+    function refresh(st) {
+      st = st || SS.state;
+      var tr = truckOf(st);
+      if (!st || !tr) return;
+      var prepNow = st.phase === 'prep', moving = travelling(tr), at = cityOf(tr.at) || cityOf('home'), dest = moving ? tr.route.to : null;
+      var plan0 = moving && prepNow && num(tr.route.left) >= num(tr.route.total), away = moving && !plan0;   // plan0: planned this morning, still parked
+      var sell = !moving && at.id !== 'home';
+      txt(statusT, truckLine(st, tr));
+      txt(statusS, sell && tr.open ? 'Rent ' + money(at.rent) + ' a day while it trades. Park it to pay nothing.' : moving ? 'No sales and no rent while it is on the road.' : at.id === 'home' ? 'Pick a town on the map to start a road trip.' : 'Parked: no rent, no sales.');
+      sw.set(tr, prepNow && sell); sw.hidden = !sell;
+      price.set(tr, prepNow);
+      homeBtn.hidden = (at.id === 'home' && !moving) || dest === 'home' || away;
+      txt(homeT, plan0 && at.id === 'home' ? 'Cancel the trip' : 'Bring it home');
+      homeBtn.disabled = !prepNow;
+      var nt = planNote(st);
+      note.hidden = !nt; txt(note.lastChild, nt);
+
+      /* pins and lines */
+      D.cities.forEach(function (c) {
+        var b = pins[c.id], visited = (tr.visited || []).indexOf(c.id) >= 0;
+        cls(b, 'is-sel', c.id === campSel); cls(b, 'is-here', !away && c.id === at.id); cls(b, 'is-dest', c.id === dest); cls(b, 'is-visited', visited);
+        b.setAttribute('aria-pressed', String(c.id === campSel));
+        b.setAttribute('aria-label', c.name + (!away && c.id === at.id ? ', the truck is here' : c.id === dest ? ', the truck is heading here' : '') +
+          (c.rent > 0 ? ', rent ' + moneyShort(c.rent) + ' a day' : '') + (visited && c.id !== 'home' ? ', visited' : ''));
+      });
+      var tripD = moving && cityOf(tr.route.from) ? arcD(cityOf(tr.route.from), cityOf(dest)) : '';
+      trips.forEach(function (p) { p.setAttribute('d', tripD); });
+      var sel = cityOf(campSel) || at, from = moving ? truckSpot(st, tr) : at;
+      plan.setAttribute('d', sel.id === (dest || at.id) ? '' : arcD(from, sel));
+
+      /* details: rebuilt only when something they show changed */
+      var e = tripTo(sel.id) || {}, here = !away && sel.id === at.id, isDest = sel.id === dest, days = here ? 0 : Math.max(0, Math.round(num(e.days)));
+      var day = num(st.day) + (prepNow ? 0 : 1) + days, wx = sel.id === 'home' ? null : cityWx(sel.id, day);
+      var k = [sel.id, st.phase, st.day, tr.at, dest, tr.open, tr.price, Math.round(num(st.cash)), JSON.stringify(e), wx && wx.type].join('|');
+      if (keys.detail !== k) { keys.detail = k; paintDetail(st, tr, sel, e, here, isDest, days, day, wx, prepNow, plan0, away); }
+
+      var tot = tr.total || {}, tk = JSON.stringify(tot);
+      if (keys.tot !== tk) {
+        keys.tot = tk;
+        var pr = num(tot.profit), costs = num(tot.costs);
+        totals.replaceChildren.apply(totals, [['calendar', 'Days traded', int(num(tot.days)), ''], ['cup', 'Cups sold', int(num(tot.cups)), ''], ['coin', 'Sales', money(num(tot.revenue)), ''],
+          ['fuel', 'Costs', costs > 0 ? '-' + money(costs) : money(0), costs > 0 ? 'bad' : ''], ['trophy', 'Profit', money(pr), pr > 0.004 ? 'good' : pr < -0.004 ? 'bad' : '']].map(function (d) {
+          return h('div', { class: 'camp-total' }, h('dt', null, I(d[0]), d[1]), h('dd', { class: 'display num ' + d[3] }, d[2]));
+        }));
+      }
+      var vk = (tr.visited || []).join(',');
+      if (keys.vis !== vk) {
+        keys.vis = vk;
+        stamps.replaceChildren.apply(stamps, D.cities.filter(function (c) { return c.id !== 'home'; }).map(function (c, i) {
+          var on = (tr.visited || []).indexOf(c.id) >= 0;
+          return h('li', { class: 'camp-stamp' + (on ? ' is-on' : ''), style: '--i:' + i + ';--r:' + ((i * 37) % 17 - 8) + 'deg' },
+            h('span', { class: 'camp-stamp-ring', 'aria-hidden': 'true' }, h('b', { class: 'display' }, initials(c.name))),
+            h('span', { class: 'camp-stamp-l' }, c.name, h('span', { class: 'hud-sr' }, on ? ', visited' : ', not yet visited')));
+        }));
+      }
+    }
+    function paintDetail(st, tr, sel, e, here, isDest, days, day, wx, prepNow, plan0, away) {
+      var home = sel.id === 'home', fuel = num(e.fuel), rent = num(e.rent != null ? e.rent : sel.rent);
+      txt(dName, sel.name);
+      txt(dBlurb, sel.blurb || '');
+      dTag.hidden = !(here || isDest || (tr.visited || []).indexOf(sel.id) >= 0);
+      txt(dTag, here ? 'The truck is here' : isDest ? 'On the way' : 'Visited');
+      cls(dTag, 'chip--lemon', here || isDest);
+      function stat(icon, label, value, meter) {
+        return h('div', { class: 'camp-stat' }, h('dt', null, I(icon), label), h('dd', null, h('b', { class: 'num' }, value),
+          meter ? h('span', { class: 'meter camp-meter', style: '--v:' + SS.clamp(meter[0], 0.04, 1).toFixed(3) + ';--meter-fill:' + meter[1], 'aria-hidden': 'true' }, h('i')) : null));
+      }
+      var thirst = sel.demand >= 1.5 ? 'Parched' : sel.demand >= 1.15 ? 'Thirsty' : sel.demand >= 0.95 ? 'Normal' : 'Low';
+      var tol = Math.round((sel.tolerance - 1) * 100);
+      dStats.replaceChildren.apply(dStats, (home ? [] : [
+        stat('people', 'Foot traffic', int(sel.traffic) + ' a day', [sel.traffic / maxT, 'var(--sky)']),
+        stat('drop', 'Thirst', thirst, [sel.demand / maxD, 'var(--coral)']),
+        stat('tag', 'Price tolerance', tol > 0 ? 'Pays ' + tol + '% more' : 'Usual prices', [sel.tolerance / maxP, 'var(--lemon)']),
+        stat('pin', 'Rent', money(rent) + ' a day')
+      ]).concat([
+        stat('fuel', 'Fuel from here', isDest ? 'Paid' : here ? 'None' : money(fuel)),
+        stat('road', 'Travel', here ? 'Already here' : isDest ? int(Math.max(0, num(tr.route.left))) + ' ' + plural(num(tr.route.left), 'day') + ' left' : int(days) + ' ' + plural(days, 'day'))
+      ]));
+
+      dWx.replaceChildren();
+      if (wx) {
+        var wd = D.weather[wx.type];
+        dWx.append(h('span', { class: 'camp-wx-ico', html: SS.icon(wd.icon) }),
+          h('div', null, h('span', { class: 'label' }, (days === 0 && prepNow ? 'Today' : 'Day ' + int(day)) + (wx.sure < 1 ? ' forecast' : ' weather')),
+            h('strong', null, wd.name + ' · ' + SS.fmtTemp(wx.temp))),
+          wx.sure < 1 ? h('span', { class: 'chip camp-wx-sure' }, 'about ' + Math.round(wx.sure * 100) + '% sure') : null);
+      }
+      dWx.hidden = !wx;
+
+      dEst.replaceChildren();
+      dEst.className = 'camp-est';
+      var lo = e.lo, hi = e.hi;
+      if (home) dEst.append(h('p', null, 'Parked at home the truck pays no rent and sells nothing. Handy between road trips.'));
+      else if (typeof lo !== 'number' || typeof hi !== 'number') dEst.append(h('p', null, 'No estimate yet for ' + sel.name + '.'));
+      else {
+        var tone = hi < 0 ? 'bad' : lo < 0 ? 'meh' : 'good', mid = (lo + hi) / 2;
+        dEst.classList.add('is-' + tone);
+        dEst.append(
+          h('div', { class: 'camp-est-top' }, h('span', { class: 'label' }, 'A day of trading'),
+            h('span', { class: 'chip camp-verdict' }, I(tone === 'good' ? 'faceHappy' : tone === 'meh' ? 'faceMeh' : 'faceSad'), tone === 'good' ? 'Worth it' : tone === 'meh' ? 'Risky' : 'Losing money')),
+          h('strong', { class: 'display num camp-est-range' }, signed(lo) + ' to ' + signed(hi)),
+          h('p', null, (typeof e.cupsLo === 'number' ? int(e.cupsLo) + ' to ' + int(e.cupsHi) + ' cups at ' + money(num(tr.price)) + ', after ' + money(rent) + ' rent and supplies. ' : 'After rent and supplies. ') +
+            (tone === 'bad' ? 'Even a good day here loses money: try a lower price or a cheaper town.' : tone === 'meh' ? 'A good day pays the rent, a slow one does not.' : 'It should beat the rent even on a slow day.') +
+            (num(e.sure) > 0 && num(e.sure) < 0.7 ? ' The forecast is shaky, so the weather may not play along.' : '') +
+            (!here && !isDest && fuel > 0 && mid > 0 ? ' The fuel pays for itself in about ' + int(Math.max(1, Math.ceil(fuel / mid))) + ' ' + plural(Math.max(1, Math.ceil(fuel / mid)), 'day') + '.' : '')));
+      }
+
+      var can = prepNow && !away && !isDest && (!here || plan0);
+      txt(goT, !prepNow ? 'Plan trips in the morning' : away ? 'On the road' : isDest ? (plan0 ? 'Leaves when you open' : 'On its way') : here ? (plan0 ? 'Stay here, cancel the trip' : 'The truck is here')
+        : (home ? 'Bring it home' : plan0 ? 'Drive here instead' : 'Drive here') + (fuel > 0 ? ' · ' + money(fuel) + ' fuel' : ''));
+      goBtn.disabled = !can;
+      if (can) why.hidden = true;
+    }
+
+    var el = h('div', { class: 'camp-own' }, bar, note, h('div', { class: 'camp-main' }, h('section', { class: 'camp-map-box' }, map), detail, book));
+    var lastSpot = '';
+    return {
+      el: el, refresh: refresh,
+      frame: function (t) {
+        var st = SS.state, tr = truckOf(st);
+        if (!tr) return;
+        var sel = cityOf(campSel) || cityOf('home');
+        paintPostcard(cv, sel.id, t, sel.id === 'home' ? null : cityWx(sel.id, num(st.day)));
+        var s = truckSpot(st, tr), k = (s.x * 100).toFixed(2) + '|' + (s.y * 100).toFixed(2) + '|' + s.flip + '|' + s.parked;
+        if (k !== lastSpot) {
+          lastSpot = k;
+          marker.style.left = (s.x * 100).toFixed(2) + '%'; marker.style.top = (s.y * 100).toFixed(2) + '%';
+          cls(marker, 'is-flip', s.flip); cls(marker, 'is-parked', s.parked); cls(marker, 'is-moving', !s.parked);
+        }
+      }
+    };
+  }
+
+  function buildCampaign() {
+    var strip = cashStrip(), root = h('div', { class: 'camp' }), view = null, owned = null, hold = false;
+    function swap() {
+      owned = !!truckOf(SS.state);
+      view = owned ? campaignView() : buildShowroom(function () { hold = true; setTimeout(function () { hold = false; refresh(); }, 1100); });
+      root.replaceChildren(h('div', { class: 'shop-bar' }, strip.el), view.el);
+    }
+    function refresh() {
+      var st = SS.state;
+      if (!st) return;
+      strip.refresh();
+      if (!hold && !!truckOf(st) !== owned) swap();
+      view.refresh(st);
+      if (SS.reduced() && view.frame) view.frame(0);
+    }
+    swap(); refresh();
+    campLoop(root, function (t) { if (view.frame) view.frame(t); });
+    return { el: root, refresh: refresh };
+  }
+
+  /* ---- prep card: where the truck is, today's weather there, open / park, price, the campaign button ---- */
+  function truckPrepSlot() {
+    var el = h('div', { class: 'prep-truck-slot prep-in', style: '--i:2', hidden: true }), kind = null, card = null;
+    function mapBtn(label) { return h('button', { class: 'btn btn--sm btn--sky prep-truck-btn', type: 'button', onclick: function () { SS.sfx('click'); open('campaign'); } }, I('map'), label); }
+    function saleCard() {
+      var T = D.truck || {};
+      return { el: h('section', { class: 'panel prep-truck prep-truck--sale' },
+        h('span', { class: 'prep-truck-ico', html: SS.icon('truck') }),
+        h('div', { class: 'prep-truck-main' }, h('span', { class: 'label' }, 'For sale'), h('strong', { class: 'prep-truck-title' }, 'A food truck of your own'),
+          h('p', { class: 'prep-truck-line' }, 'Take your lemonade on a road trip for ' + moneyShort(num(T.cost)) + '.')),
+        mapBtn('Take a look')) };
+    }
+    function ownCard() {
+      var tr0 = truckOf(SS.state), line = h('strong', { class: 'prep-truck-title' }), sub = h('p', { class: 'prep-truck-line' });
+      var wx = h('span', { class: 'chip chip--sky prep-truck-wx', hidden: true }), sw = openSwitch(), price = truckPriceBox(tr0);
+      var ctl = h('div', { class: 'prep-truck-ctl' }, sw, h('div', { class: 'camp-price' }, h('span', { class: 'label' }, 'Cup price'), price));
+      var el2 = h('section', { class: 'panel prep-truck' },
+        h('div', { class: 'prep-truck-top' }, h('span', { class: 'prep-truck-ico', html: SS.icon('truck') }),
+          h('div', { class: 'prep-truck-main' }, h('span', { class: 'label' }, 'Food truck'), line, sub), mapBtn('Campaign')),
+        ctl);
+      return { el: el2, refresh: function (st, tr) {
+        var moving = travelling(tr), at = cityOf(tr.at) || cityOf('home'), sell = !moving && at.id !== 'home', w = sell ? cityWx(at.id, num(st.day)) : null;
+        txt(line, truckLine(st, tr));
+        var pi = sell && tr.open && st.phase === 'prep' ? call('prepInfo') : null, short = !!(pi && pi.truckShut);
+        txt(sub, sell ? (tr.open ? 'Rent ' + money(at.rent) + ' today. ' + (short ? 'After your shopping you cannot pay it, so it stays shut.' : '') : 'Parked today: no rent. ') + (short ? '' : 'Same recipe as the stand.') : moving ? 'No sales or rent until it arrives.' : 'Pick a town on the campaign map.');
+        cls(sub, 'is-bad', short);
+        wx.hidden = !w;
+        if (w && wx._k !== w.type + w.temp) { wx._k = w.type + w.temp; wx.replaceChildren(I(D.weather[w.type].icon), D.weather[w.type].name + ' ' + SS.fmtTemp(w.temp)); }
+        if (wx.parentNode !== sub.parentNode) sub.parentNode.insertBefore(wx, sub);
+        ctl.hidden = !sell;
+        sw.set(tr, st.phase === 'prep'); price.set(tr, st.phase === 'prep');
+      } };
+    }
+    function refresh() {
+      var st = SS.state, tr = truckOf(st), k = tr ? 'own' : call('truckUnlocked') ? 'sale' : '';
+      if (k !== kind) {
+        kind = k; card = k === 'own' ? ownCard() : k === 'sale' ? saleCard() : null;
+        if (card) el.replaceChildren(card.el); else el.replaceChildren();
+        el.hidden = !card;
+      }
+      if (card && card.refresh) card.refresh(st, tr);
+    }
+    refresh();
+    return { el: el, refresh: refresh };
+  }
+
+  /* ---- results: the truck's day as extra tally rows (stand subtotal, truck lines, truck profit); the existing total becomes the combined one ---- */
+  function truckResultRows(raw, st) {
+    var t = raw && raw.truck;
+    if (!t || typeof t !== 'object') return [];
+    var c = cityOf(t.city) || cityOf('home'), status = TRUCK_SAYS[t.status] ? t.status : 'parked', rows = [];
+    var tp = num(t.profit), sp = raw.standProfit != null ? num(raw.standProfit) : num(raw.profit) - tp;
+    function tone(v) { return v > 0.004 ? 'good' : v < -0.004 ? 'bad' : ''; }
+    function row(icon, label, value, tn, extra) { return h('div', { class: 'res-row' + (extra ? ' ' + extra : '') }, h('dt', null, icon ? I(icon) : null, label), h('dd', { class: 'num ' + (tn || '') }, value)); }
+    function counted(el, v) { var dd = el.lastChild; el._in = function (instant) { SS.countTo(dd, v, { from: 0, ms: instant ? 0 : 700 }); }; return el; }
+    rows.push(counted(row('stand', 'Stand profit', money(sp), tone(sp), 'res-row--sub'), sp));
+    var wx = t.weather && D.weather[t.weather.type];
+    rows.push(h('div', { class: 'res-row res-row--truck' }, h('dt', null, I('truck'), h('span', null, 'Food truck · ' + c.name)),
+      h('dd', null, h('span', { class: 'chip res-truck-chip res-truck-chip--' + status }, wx ? I(wx.icon) : null, TRUCK_SAYS[status]))));
+    var r = truckOf(st) && truckOf(st).route, left = r ? Math.max(0, Math.round(num(r.left))) : 0, to = r && cityOf(r.to);
+    var news = status === 'arrived' ? (c.id === 'home' ? 'Back home, parked next to your stand.' : 'Rolled into ' + c.name + (num(t.cups) > 0 ? ' and opened straight away.' : '. Ready to trade tomorrow.'))
+      : status === 'travelling' ? 'On the road' + (to ? ' to ' + to.name : '') + (left > 0 ? ', ' + left + ' ' + plural(left, 'day') + ' to go.' : '.')
+      : status === 'parked' ? (c.id === 'home' ? 'Parked next to your stand.' : 'Parked in ' + c.name + ': no rent, no sales.') : '';
+    if (news) rows.push(h('div', { class: 'res-row res-row--note' }, h('dt', null, news)));
+    if (num(t.cups) > 0 || status === 'trading') rows.push(row('cup', 'Truck cups', int(num(t.cups))), row('coin', 'Truck sales', signed(num(t.revenue)), num(t.revenue) > 0 ? 'good' : ''));
+    if (num(t.supplies) > 0) rows.push(row('lemon', 'Truck supplies', '-' + money(num(t.supplies)), 'bad'));
+    if (num(t.rent) > 0) rows.push(row('pin', 'Rent in ' + c.name, '-' + money(num(t.rent)), 'bad'));
+    if (num(t.fuel) > 0) rows.push(row('fuel', 'Fuel', '-' + money(num(t.fuel)), 'bad'));
+    rows.push(counted(row('truck', 'Truck profit', money(tp), tone(tp), 'res-row--sub'), tp));
+    return rows;
+  }
+
+  /* truck events refresh the prep card and an open modal like the other sim events (registered here to keep this section self-contained) */
+  var coachSeen = { st: null, on: false };
+  /** a coach toast the moment the truck first goes on sale in this session */
+  function truckCoach() {
+    var st = SS.state;
+    if (!st || !st.stats || st.phase === 'title') return;
+    var on = !truckOf(st) && !!call('truckUnlocked');
+    if (coachSeen.st === st && on && !coachSeen.on && SS.UI && SS.UI.toast) SS.UI.toast('A food truck is for sale! Find it on your morning prep card.', 'good', 'truck');
+    coachSeen.st = st; coachSeen.on = on;
+  }
+  if (SS.on) {
+    ['truck:buy', 'truck:set', 'truck:depart', 'truck:arrive'].forEach(function (e) { SS.on(e, function () { onChange(); }); });
+    ['phase', 'location:unlock', 'truck:buy'].forEach(function (e) { SS.on(e, truckCoach); });
+  }
+
+  /* ------------------------------------------------------------------ *
+   * CUSTOMISE: the stand's and the food truck's looks. Rules live in sim.js (customBuy / customSet / customAppeal);
+   * this screen lets the player try a look on a live preview before paying for it.
+   * ------------------------------------------------------------------ */
+  var cusTab = 'stand', DECOR_MAX = 4;
+  var NAME_OK = /^[A-Z0-9 &'!.\-]*$/;                     // what sim.js keeps on a sign
+  var SLOT = {
+    paint: ['Paint', 'paint'], trim: ['Trim', 'brush'], accent: ['Accent', 'brush'], awning: ['Awning', 'awning'], sign: ['Sign', 'sign'],
+    layout: ['Layout', 'stand'], decor: ['Decorations', 'decor'], wrap: ['Wrap', 'gift'], topper: ['Roof topper', 'star'], lights: ['Lights', 'sparkle'], name: ['Name', 'tag']
+  };
+  var SWATCH = { paint: 1, trim: 1, accent: 1, awning: 1, wrap: 1 };
+  var OPT_ICON = {
+    sign: { classic: 'sign', chalk: 'recipe', wood: 'sign', marquee: 'sparkle', neon: 'sun' },
+    layout: { classic: 'stand', flipped: 'stand', showcase: 'lemon' },
+    decor: { flowers: 'locPark', bunting: 'decor', lights: 'sparkle', balloons: 'gift', plant: 'lemon', menu: 'recipe' },
+    topper: { none: 'close', lemon: 'lemon', cup: 'drink', horn: 'speaker' },
+    lights: { none: 'close', bulbs: 'sparkle', neon: 'sun' }
+  };
+  var CHEER = ['Looking zesty!', 'Now that is a-peel-ing.', 'Fresh look, fresh lemons!', 'Ooh, fancy!', 'Main-squeeze material.', 'Customers will stop and stare.'];
+  function squeezy(pose) { var U = SS.UI; return U && U.squeezy ? U.squeezy(pose) : h('span'); }
+  function pick1(a) { return a[Math.floor(Math.random() * a.length)]; }
+  function lookOf(st, target) { var c = st && st.custom; return (c && c[target]) || D.customDefaults()[target]; }
+  function cusOwned(st, target, slot, o) {
+    var S = sim(), v = S && S.customOwned ? safe('customOwned', function () { return S.customOwned(target, slot, o.id); }) : undefined;
+    if (typeof v === 'boolean') return v;
+    return !(o.cost > 0) || ((st.custom && st.custom.owned) || []).indexOf(target + '.' + slot + '.' + o.id) >= 0;
+  }
+  /** why an option is still locked, or '' */
+  function cusLock(st, o) {
+    if (!o.req) return '';
+    if (o.req === 'truck') return st.truck ? '' : 'Buy the food truck first.';
+    if ((st.milestonesDone || []).indexOf(o.req) >= 0) return '';
+    var m = D.byId(D.milestones, o.req);
+    return m ? 'Unlocks with the goal "' + m.title + '": ' + m.desc : 'Not unlocked yet.';
+  }
+  /** sim.js sells looks only while the stand is closed (equipping works any time) */
+  function cusClosed(st) { return st.phase === 'day' ? 'You can buy it after you close for the day. Try it on now!' : ''; }
+  /** the style bonus of a look: option appeal summed and capped, the same sum sim.js makes */
+  function cusAppeal(target, look) {
+    var cat = D.custom[target], a = 0;
+    D.customSlots[target].forEach(function (slot) {
+      if (!Array.isArray(cat[slot])) return;
+      (slot === 'decor' ? look.decor || [] : [look[slot]]).forEach(function (id) { var o = D.byId(cat[slot], id); if (o && o.appeal) a += o.appeal; });
+    });
+    return Math.min(a, D.custom.appealCap);
+  }
+  function plusPct(a) { return '+' + Math.round(num(a) * 100) + '%'; }
+  function truckPaint(look) { var o = D.byId(D.custom.truck.paint, look.paint); return (o && o.color) || '#ffd83d'; }
+  /** the little picture on an option: a colour swatch (with its pattern), an icon, or Squeezy */
+  function optArt(slot, o, look) {
+    var art = h('span', { class: 'cus-art' }), sq = o.id === 'squeezy' || o.id === 'cutout' || o.id === 'costume';
+    if (SWATCH[slot]) {
+      art.className = 'cus-art cus-sw' + (o.pattern ? ' cus-pat--' + o.pattern : '') + (slot === 'wrap' ? ' cus-pat--' + o.id : '') + (!o.color && !o.colors && slot !== 'wrap' ? ' cus-sw--classic' : '');
+      if (o.colors) {
+        var n = o.colors.length < 3 ? 4 : o.colors.length, s = [], i;
+        for (i = 0; i < n; i++) s.push(o.colors[i % o.colors.length] + ' ' + (i * 100 / n) + '% ' + ((i + 1) * 100 / n) + '%');
+        art.style.background = 'linear-gradient(90deg,' + s.join(',') + ')';
+      } else if (o.color || slot === 'wrap') art.style.setProperty('--c', o.color || truckPaint(look));
+      if (sq) art.append(squeezy());
+    } else if (sq) art.append(squeezy());
+    else art.innerHTML = SS.icon((OPT_ICON[slot] && OPT_ICON[slot][o.id]) || SLOT[slot][1]);
+    if (o.id === 'flipped') art.classList.add('is-flip');
+    return art;
+  }
+
+  function buildCustom() {
+    var strip = cashStrip(), raf = 0, seen = false, frames = 0, failed = {}, tabs = {};
+    var v = { target: cusTab, trial: null, name: null, opts: [], decorN: null, tryKey: '' };
+    var canvas = h('canvas', { class: 'cus-canvas', 'aria-hidden': 'true' });
+    var bonus = h('b', { class: 'num' }), bonusNote = h('span', { class: 'cus-bonus-note num' });
+    var stage = h('div', { class: 'cus-stage' }, canvas,
+      h('span', { class: 'chip chip--lemon cus-bonus', title: 'A good-looking business pulls in more customers' }, I('people'), h('span', null, bonus, ' customers'), bonusNote));
+    var tryArt = h('span', { class: 'cus-try-art' }), tryName = h('b', { class: 'cus-try-name' }), tryNote = h('span', { class: 'cus-try-note' });
+    var buyT = h('span'), buyBtn = h('button', { class: 'btn btn--primary btn--sm cus-buy', type: 'button', onclick: buy }, I('coin'), buyT);
+    var tryBar = h('div', { class: 'cus-try', hidden: true }, tryArt, h('div', { class: 'cus-try-text' }, tryName, tryNote), buyBtn,
+      h('button', { class: 'btn btn--icon btn--sm cus-try-x', type: 'button', 'aria-label': 'Stop trying this on', onclick: function () { SS.sfx('click'); v.trial = null; refresh(); } }, I('close')));
+    var sayT = h('span', { class: 'cus-say-text' }), say = h('p', { class: 'cus-say', role: 'status' }, squeezy('talk'), sayT);
+    var list = h('div', { class: 'cus-list' });
+    function tab(k, label, icon) {
+      return (tabs[k] = h('button', { class: 'shop-tab cus-tab', type: 'button', role: 'tab', onclick: function () { if (v.target !== k) { SS.sfx('click'); setTab(k); } } }, I(icon), h('span', null, label)));
+    }
+    var root = h('div', { class: 'cus' },
+      h('div', { class: 'cus-side' }, h('div', { class: 'shop-tabs cus-tabs', role: 'tablist' }, tab('stand', 'Stand', 'stand'), tab('truck', 'Truck', 'truck')), stage, tryBar, say),
+      h('div', { class: 'cus-main' }, strip.el, list));
+
+    function tell(text, bad) { txt(sayT, text); cls(say, 'is-bad', !!bad); restart(say, 'cus-say-pop'); }
+    function nope(text) { SS.sfx('error'); restart(v.trial ? tryBar : say, 'shop-shake'); tell(text, true); }
+    function preview(st) {
+      var base = lookOf(st, v.target), pv = Object.assign({}, base, { decor: (base.decor || []).slice() }), t = v.trial;
+      if (t && t.slot === 'decor') { if (pv.decor.indexOf(t.o.id) < 0 && pv.decor.length < DECOR_MAX) pv.decor.push(t.o.id); }
+      else if (t) pv[t.slot] = t.o.id;
+      if (v.name) pv.name = v.name;
+      return pv;
+    }
+    function isOn(look, slot, id) { return slot === 'decor' ? (look.decor || []).indexOf(id) >= 0 : look[slot] === id; }
+
+    /* picking: an owned option goes on at once; anything else is tried on first, and the bar under the preview sells it */
+    function pick(slot, o) {
+      var st = SS.state, look = lookOf(st, v.target);
+      if (!st) return;
+      if (!cusOwned(st, v.target, slot, o)) { SS.sfx('click'); v.trial = v.trial && v.trial.o === o ? null : { slot: slot, o: o }; refresh(); return; }
+      v.trial = null;
+      if (slot !== 'decor' && look[slot] === o.id) { refresh(); return; }
+      if (slot === 'decor' && !isOn(look, slot, o.id) && (look.decor || []).length >= DECOR_MAX) { nope('The stand fits ' + DECOR_MAX + ' decorations. Take one down first.'); refresh(); return; }
+      equip(slot, o);
+    }
+    function equip(slot, o) {
+      var S = sim(), target = v.target, r = S && S.customSet ? safe('customSet', function () { return S.customSet(target, slot, o.id); }) : null;
+      if (!r || !r.ok) { nope((r && r.reason) || 'Customising is still being set up.'); return; }
+      tell(isOn(lookOf(SS.state, target), slot, o.id) ? o.label + ' on. ' + pick1(CHEER) : o.label + ' taken down.');
+      refresh();
+    }
+    function buy() {
+      var st = SS.state, t = v.trial, S = sim();
+      if (!st || !t) return;
+      var lock = cusLock(st, t.o) || cusClosed(st);
+      if (lock) { nope(lock); return; }
+      if (num(st.cash) + 1e-9 < t.o.cost) { nope('You need ' + money(t.o.cost - num(st.cash)) + ' more for ' + t.o.label + '.'); return; }
+      var r = S && S.customBuy ? safe('customBuy', function () { return S.customBuy(v.target, t.slot, t.o.id); }) : null;
+      if (!r || !r.ok) { nope((r && r.reason) || 'Customising is still being set up.'); return; }
+      v.trial = null;
+      restart(stage, 'cus-stage-pop');
+      var look = lookOf(SS.state, v.target);
+      if (isOn(look, t.slot, t.o.id)) { tell(t.o.label + ' is yours. ' + pick1(CHEER)); refresh(); }
+      else if (t.slot === 'decor' && (look.decor || []).length >= DECOR_MAX) { tell(t.o.label + ' is yours. Take a decoration down to put it up.'); refresh(); }
+      else equip(t.slot, t.o);
+    }
+
+    function nameField(target) {
+      var max = (D.custom.nameMax && D.custom.nameMax[target]) || 14, id = 'cus-name-' + target, timer = 0;
+      var count = h('span', { class: 'cus-name-n num', 'aria-hidden': 'true' }), msg = h('span', { class: 'cus-name-msg', id: id + '-msg' });
+      var inp = h('input', { class: 'cus-name-in display', id: id, type: 'text', maxlength: String(max), autocomplete: 'off', autocapitalize: 'characters',
+        spellcheck: 'false', enterkeyhint: 'done', 'aria-label': target === 'truck' ? 'Truck name' : 'Stand name', 'aria-describedby': id + '-msg' });
+      inp.value = lookOf(SS.state, target).name || '';
+      function check() {
+        var raw = inp.value.toUpperCase(), t = raw.replace(/\s+/g, ' ').trim();
+        var bad = !t ? 'Give it a name.' : !NAME_OK.test(raw) ? 'Letters, numbers, spaces and & \' ! . - only.' : '';
+        txt(count, raw.length + '/' + max);
+        txt(msg, bad || (t === lookOf(SS.state, target).name ? 'This is on your sign.' : 'Looks great. It goes on the sign as you type.'));
+        cls(msg, 'is-bad', !!bad); inp.setAttribute('aria-invalid', bad ? 'true' : 'false');
+        v.name = bad ? null : t; kick();
+        return bad ? '' : t;
+      }
+      function commit() {
+        clearTimeout(timer);
+        var t = check(), S = sim();
+        if (!t || t === lookOf(SS.state, target).name || !S || !S.customSet) return;
+        var r = safe('customSet', function () { return S.customSet(target, 'name', t); });
+        if (r && r.ok) check(); else if (r) tell(r.reason, true);
+      }
+      inp.addEventListener('input', function () { check(); clearTimeout(timer); timer = setTimeout(commit, 700); });
+      inp.addEventListener('change', commit);
+      inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); inp.blur(); commit(); } });
+      check();
+      return h('div', { class: 'cus-name' }, h('div', { class: 'cus-name-row' }, inp, count), msg);
+    }
+    function teaser() {
+      var S = sim(), T = D.truck, loc = D.byId(D.locations, T.unlockLocation);
+      var can = S && S.truckUnlocked ? !!safe('truckUnlocked', S.truckUnlocked) : false;
+      return h('div', { class: 'panel cus-teaser' }, squeezy('wow'),
+        h('h3', { class: 'display cus-teaser-title' }, 'Your own food truck'),
+        h('p', null, 'Paint it, wrap it, string up lights and crown it with a giant lemon. Then take it on the road.'),
+        h('p', { class: 'cus-hint' }, can ? 'It is ready to buy for ' + moneyShort(T.cost) + '.' : 'Unlocks when you open at ' + (loc ? loc.name : 'Downtown') + ' or reach ' + moneyShort(T.unlockLifetime) + ' in sales.'),
+        MODALS.campaign ? h('button', { class: 'btn btn--go', type: 'button', onclick: function () { SS.sfx('click'); open('campaign'); } }, I('truck'), can ? 'Get the truck' : 'See the truck') : null);
+    }
+    function buildList() {
+      var st = SS.state, target = v.target, cat = D.custom[target];
+      v.opts = []; v.decorN = null; list.textContent = '';
+      if (target === 'truck' && !(st && st.truck)) { list.append(teaser()); return; }
+      D.customSlots[target].forEach(function (slot) {
+        var head = h('h3', { class: 'cus-sec-title' }, I(SLOT[slot][1]), h('span', null, slot === 'name' ? (target === 'truck' ? 'Truck name' : 'Stand name') : SLOT[slot][0]));
+        var sec = h('section', { class: 'cus-sec cus-sec--' + slot }, head);
+        if (slot === 'name') { sec.append(nameField(target)); list.append(sec); return; }
+        if (!Array.isArray(cat[slot])) return;
+        if (slot === 'decor') { head.append(v.decorN = h('span', { class: 'chip num cus-decor-n' })); sec.append(h('p', { class: 'cus-hint' }, 'Up to ' + DECOR_MAX + ' fit on the stand at once. Tap one you own to put it up or take it down.')); }
+        var grid = h('div', { class: 'cus-grid' + (SWATCH[slot] ? ' cus-grid--sw' : ''), role: 'group', 'aria-label': SLOT[slot][0] });
+        cat[slot].forEach(function (o) {
+          var art = optArt(slot, o, lookOf(st, target)), price = h('span', { class: 'cus-price num' });
+          var b = h('button', { class: 'cus-opt ' + (SWATCH[slot] ? 'cus-opt--sw' : 'cus-opt--card'), type: 'button', title: o.label, onclick: function () { pick(slot, o); } },
+            art, SWATCH[slot] ? null : h('span', { class: 'cus-opt-name' }, o.label), price, o.appeal ? h('span', { class: 'cus-opt-ap num', 'aria-hidden': 'true' }, plusPct(o.appeal)) : null);
+          v.opts.push({ slot: slot, o: o, el: b, art: art, price: price, k: '' });
+          grid.append(b);
+        });
+        sec.append(grid);
+        list.append(sec);
+      });
+    }
+    function setTab(k) {
+      var st = SS.state;
+      cusTab = v.target = k; v.trial = null; v.name = null;
+      ['stand', 'truck'].forEach(function (t) { var on = t === k; cls(tabs[t], 'is-on', on); tabs[t].setAttribute('aria-selected', on ? 'true' : 'false'); });
+      buildList(); refresh();
+      tell(k === 'stand' ? 'Tap anything to try it on. You only pay if you keep it.'
+        : st && st.truck ? 'Let\'s make this truck the talk of the nation!' : 'A truck of our own? That would be zest-tastic.');
+    }
+    function refresh() {
+      var st = SS.state, target = v.target, S = sim();
+      if (!st) return;
+      strip.refresh();
+      cls(tabs.truck, 'is-locked', !st.truck);
+      var look = lookOf(st, target), pv = preview(st), cash = num(st.cash);
+      v.opts.forEach(function (r) {
+        var o = r.o, own = cusOwned(st, target, r.slot, o), lock = own ? '' : cusLock(st, o), on = isOn(look, r.slot, o.id), card = !SWATCH[r.slot];
+        var k = on ? 'on' : own ? 'own' : lock ? 'lock' : 'buy';
+        cls(r.el, 'is-on', on); cls(r.el, 'is-owned', own); cls(r.el, 'is-locked', !!lock);
+        cls(r.el, 'is-trial', !!v.trial && v.trial.o === o);
+        cls(r.el, 'is-dear', k === 'buy' && cash + 1e-9 < o.cost);
+        r.el.setAttribute('aria-pressed', on ? 'true' : 'false');
+        if (r.k !== k) {
+          r.k = k;
+          r.price.replaceChildren.apply(r.price, k === 'on' ? [I('check'), card ? (r.slot === 'decor' ? 'Up' : 'On') : ''] : k === 'own' ? ['Yours'] : k === 'lock' ? [I('lock')] : [o.cost > 0 ? moneyShort(o.cost) : 'Free']);
+          r.el.setAttribute('aria-label', o.label + ', ' + (k === 'on' ? 'in use' : k === 'own' ? 'yours, tap to use' : k === 'lock' ? 'locked' : o.cost > 0 ? money(o.cost) + ', tap to try it on' : 'free'));
+        }
+        if (r.slot === 'wrap') r.art.style.setProperty('--c', truckPaint(pv));
+      });
+      if (v.decorN) txt(v.decorN, (look.decor || []).length + '/' + DECOR_MAX + ' up');
+      var now = S && S.customAppeal ? num(safe('customAppeal', function () { return S.customAppeal(target); })) : cusAppeal(target, look);
+      var next = now + cusAppeal(target, pv) - cusAppeal(target, look);
+      txt(bonus, plusPct(now));
+      txt(bonusNote, v.trial && Math.abs(next - now) > 0.004 ? '→ ' + plusPct(next) : '');
+      var t = v.trial;
+      tryBar.hidden = !t;
+      if (t) {
+        var locked = cusLock(st, t.o), lock = locked || cusClosed(st), short = cash + 1e-9 < t.o.cost, key = t.slot + '.' + t.o.id;
+        if (v.tryKey !== key) { v.tryKey = key; tryArt.replaceChildren(optArt(t.slot, t.o, pv)); restart(tryBar, 'cus-try-in'); }
+        txt(tryName, t.o.label + (SWATCH[t.slot] && t.slot !== 'wrap' ? ' ' + SLOT[t.slot][0].toLowerCase() : ''));
+        txt(tryNote, lock || (short ? 'You have ' + money(cash) + '. Keep selling!' : 'Cash ' + money(cash) + ' → ' + money(cash - t.o.cost)));
+        txt(buyT, locked ? 'Locked' : lock ? 'Later' : 'Buy for ' + moneyShort(t.o.cost));
+        buyBtn.setAttribute('aria-disabled', lock || short ? 'true' : 'false');
+        buyBtn.setAttribute('aria-label', 'Buy ' + t.o.label + ' for ' + money(t.o.cost));
+        cls(tryBar, 'is-locked', !!lock);
+      } else v.tryKey = '';
+      cls(stage, 'is-truckless', target === 'truck' && !st.truck);
+      kick();
+    }
+
+    /* the live preview: one canvas, drawn only while the screen is open (once per change with reduced motion) */
+    function draw(t) {
+      var st = SS.state, w = canvas.clientWidth, ht = canvas.clientHeight, key = v.target, drew = false;
+      if (!st || !w || !ht) return;
+      var dpr = Math.min(2, window.devicePixelRatio || 1), cw = Math.round(w * dpr), ch = Math.round(ht * dpr);
+      if (canvas.width !== cw || canvas.height !== ch) { canvas.width = cw; canvas.height = ch; }
+      var g = canvas.getContext('2d'), look = preview(st), A = SS.Actors, V = SS.Vehicles;
+      g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, ht);
+      g.save();
+      try {
+        if (key === 'stand' && A && typeof A.drawStandPreview === 'function') { A.drawStandPreview(g, w, ht, look, t); drew = true; }
+        else if (key === 'truck' && V && typeof V.drawTruck === 'function') {
+          var s = Math.min(w / 400, ht / 345);                     // ~360 long; the tallest roof topper reaches ~330 up
+          g.translate(w / 2, ht - 6); g.scale(s, s);
+          if (!st.truck) g.globalAlpha = 0.5;
+          V.drawTruck(g, look, { t: t, reduced: SS.reduced() }); drew = true;
+        }
+      } catch (e) { if (!failed[key]) { failed[key] = 1; if (window.console) console.error('[SS.Screens] customise preview failed', e); } }
+      g.restore();
+      if (!drew && SS.Mascot && SS.Mascot.draw) { g.clearRect(0, 0, w, ht); SS.Mascot.draw(g, w / 2, ht / 2, Math.min(w, ht) * 0.62, { rot: Math.sin(t * 2) * 0.08 }); }
+    }
+    function frame(now) {
+      raf = 0;
+      if (root.isConnected) seen = true; else if (seen || ++frames > 240) return;     // closed (or never shown): stop
+      draw(SS.reduced() ? 0 : now / 1000);
+      if (!SS.reduced()) raf = requestAnimationFrame(frame);
+    }
+    function kick() { if (!raf) raf = requestAnimationFrame(frame); }
+    if (window.ResizeObserver) new ResizeObserver(function () { kick(); }).observe(canvas);
+
+    setTab(SS.state && SS.state.truck ? cusTab : 'stand');
+    return { el: root, refresh: refresh };
+  }
+
+  /* Squeezy's take on the day, for the results card: a pose and a pun picked by how it went */
+  function squeezyReact(r, raw) {
+    var said, pose, p = num(r.profit), wet = r.weather && (r.weather.type === 'rainy' || r.weather.type === 'storm');
+    if (r.bestDay && num(r.profit) > 0) { pose = 'cheer'; said = ['Best day yet! I\'m bursting with zest!', 'Record day! Somebody pinch my peel.']; }
+    else if (raw && raw.groceries) { pose = 'cheer'; said = ['Thanks, Mom! Free lemons are the best lemons.', 'Mom saved the day. Again.']; }
+    else if (r.people && r.people.soldout > 0) { pose = 'wow'; said = ['We squeezed the pantry dry! Stock up more tomorrow.', 'Sold out! That is a juicy problem to have.']; }
+    else if (p < -0.004 && raw && raw.truck && num(raw.truck.profit) < 0 && num(raw.standProfit) > 0) {   // the stand did fine: the truck cost the day
+      pose = 'talk'; said = raw.truck.status === 'trading' ? ['The stand did fine. The truck wants a cheaper town or a better price.'] : ['Fuel now, cups later. Road trips pay off once we get there!'];
+    }
+    else if (wet && p <= 40) { pose = p < 0 ? 'sad' : 'talk'; said = ['Rain, rain, go away. Come back on a lemonade day!']; }
+    else if (p > 40) { pose = 'cheer'; said = ['That is what I call a squeeze of success!', 'Cha-ching! We are on a zest streak.']; }
+    else if (p > 0.004) { pose = 'talk'; said = ['A tidy little profit. Every cup counts!', 'Not bad at all. Let\'s squeeze out a bit more tomorrow.']; }
+    else if (p < -0.004) { pose = 'sad'; said = ['Ouch, a sour one. Tomorrow we turn it into lemonade.', 'When life hands you a loss, make a better recipe.']; }
+    else { pose = 'talk'; said = ['Even-steven. Tomorrow we squeeze harder!']; }
+    return h('div', { class: 'res-sq res-sq--' + pose }, squeezy(pose), h('p', { class: 'res-sq-line' }, h('b', null, D.mascot.name + ': '), said[num(r.day) % said.length]));
+  }
+
+  /* ------------------------------------------------------------------ *
    * Opening and closing
    * ------------------------------------------------------------------ */
   var MODALS = {
@@ -1200,6 +1989,8 @@
     map: { title: 'Town map', icon: 'map', build: buildMap },
     goals: { title: 'Goals', icon: 'trophy', build: buildGoals },
     dealer: { title: 'Dex\'s Deals', icon: 'dealer', build: buildDealer },
+    campaign: { title: 'Food truck', icon: 'truck', build: buildCampaign },
+    custom: { title: 'Customise', icon: 'brush', build: buildCustom },
     legal: { title: 'Privacy & Terms', icon: 'info', build: buildLegal, any: true }   // any: works on the title screen too, with no game loaded
   };
   /** used only when ui.js is not there: a plain panel in #modal-root */

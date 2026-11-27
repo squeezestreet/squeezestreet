@@ -400,10 +400,11 @@
    * NEW STATE (all optional in old saves; sim.js load() fills defaults so every existing save keeps working)
    *   state.truck: null | {                     // null until bought
    *     at: cityId,                             // where the truck is ('home' = parked next to your stand)
-   *     route: null | { from, to, left, total },// travelling: days left (no sales, no rent while travelling)
+   *     route: null | { from, to, left, total, fuel },// travelling: days left (no sales, no rent while travelling); fuel = paid for this trip
+   *                                             // (while left === total in 'prep' it has not left yet: truckGo again changes the plan and refunds it)
    *     open: true,                             // true = trading at `at` each day (pays that city's rent); false = parked, free
    *     price: 2.00,                            // the truck's own cup price (flavor and recipe are the stand's)
-   *     daysAt: 0,                              // trading days in a row at `at` (crowds thin out the longer you stay)
+   *     daysAt: 0,                              // trading days at `at` (crowds thin out the longer you stay; a day parked there takes one off)
    *     visited: [cityIds],
    *     total: { days, cups, revenue, costs, profit }
    *   }
@@ -423,10 +424,13 @@
    *   truckUnlocked() -> bool                   buyTruck() -> {ok, reason}
    *   truckGo(cityId) -> {ok, reason, days, fuel}   prep only; pays fuel now, leaves when the day starts ('home' brings it back)
    *   truckSetOpen(bool)   truckSetPrice(n)     truckEstimate(cityId) -> { cupsLo, cupsHi, lo, hi, rent, fuel, days }  (daily profit range)
-   *   cityWeather(cityId, day) -> { type, temp }   deterministic per seed/day/city (a forecast the campaign map can show)
+   *   cityWeather(cityId, day) -> { type, temp }   the real weather, deterministic per seed/day/city (the truck's day resolves with it)
+   *   cityForecast(cityId, day) -> { type, temp, confidence }   what the map and truckEstimate go by: off by one step now and then, more often
+   *                                             further ahead; the real weather for today once open and for past days. truckEstimate also returns sure.
    *   customOwned(target, slot, id) -> bool     customBuy(target, slot, id) -> {ok, reason}
    *   customSet(target, slot, value) -> {ok, reason}   value: an option id; for 'decor' toggles that id; for 'name' a string
-   *   customAppeal(target) -> 0..DATA.custom.appealCap   extra customers from the look ('stand' applies to the stand day, 'truck' to truck sales)
+   *   customAppeal(target) -> 0..DATA.custom.appealCap   extra customers from the look ('stand': more people come by and they pay a little
+   *                                             more, so it still counts on full, busy days; 'truck': more truck sales)
    *
    * NEW BUS EVENTS
    *   'truck:buy' {}   'truck:set' {}   'truck:depart' {from, to, days}   'truck:arrive' {city}   'truck:day' {result}
@@ -438,28 +442,28 @@
   DATA.mascot = { name: 'Squeezy', tagline: 'Stay zesty!' };
 
   DATA.truck = {
-    cost: 1500,                 // buy price
+    cost: 2200,                 // buy price
     unlockLocation: 'downtown', // available once this location is unlocked (or lifetime sales reach unlockLifetime)
     unlockLifetime: 2500,
-    capacity: 220,              // most cups it can sell in a day
+    capacity: 300,              // most cups it can sell in a day
     priceStart: 2.0,
-    fuelPerMap: 180,            // fuel cost per 1.0 of map distance
+    fuelPerMap: 260,            // fuel cost per 1.0 of map distance
     mapPerDay: 0.32,            // map distance covered per travel day
-    fatigue: 0.08               // demand lost per extra day in a row at the same city (floored at 55%)
+    fatigue: 0.08               // demand lost per trading day at the same city (floored at 55%; each day parked there gives one day back)
   };
   // x, y: position on the campaign map (0..1, x east, y south). traffic: passers-by a day; demand: thirst (1 = normal);
   // tolerance: what prices they accept relative to normal; rent: per trading day; supply: local cost of supplies (x market);
   // climate: which weather it leans to.
   DATA.cities = [
     { id: 'home',     name: 'Home',             x: 0.50, y: 0.55, traffic: 0,   demand: 0,    tolerance: 1,    rent: 0,   supply: 1,    climate: 'mild',  blurb: 'Parked next to your stand.' },
-    { id: 'maple',    name: 'Maple Falls',      x: 0.62, y: 0.40, traffic: 70,  demand: 1.0,  tolerance: 1.0,  rent: 45,  supply: 1.0,  climate: 'mild',  blurb: 'A friendly little town. Cheap, but quiet.' },
-    { id: 'pines',    name: 'Pinecrest',        x: 0.34, y: 0.30, traffic: 90,  demand: 0.75, tolerance: 1.15, rent: 60,  supply: 1.1,  climate: 'cool',  blurb: 'Mountain hikers. Cool air, low thirst.' },
-    { id: 'dust',     name: 'Dustwater Springs',x: 0.22, y: 0.66, traffic: 80,  demand: 1.9,  tolerance: 1.5,  rent: 110, supply: 1.35, climate: 'hot',   blurb: 'Desert town. Few people, all of them parched.' },
-    { id: 'sunport',  name: 'Sunport Beach',    x: 0.80, y: 0.78, traffic: 160, demand: 1.35, tolerance: 1.2,  rent: 180, supply: 1.05, climate: 'hot',   blurb: 'Boardwalk crowds and sunshine.' },
-    { id: 'harbor',   name: 'Harbor City',      x: 0.88, y: 0.32, traffic: 230, demand: 1.0,  tolerance: 1.4,  rent: 330, supply: 1.0,  climate: 'mild',  blurb: 'Busy docks and office towers.' },
-    { id: 'capitol',  name: 'Capitol Heights',  x: 0.70, y: 0.16, traffic: 270, demand: 0.9,  tolerance: 1.65, rent: 440, supply: 1.1,  climate: 'mild',  blurb: 'Big spenders, big rent.' },
-    { id: 'bloom',    name: 'Bloomfield Fair',  x: 0.40, y: 0.84, traffic: 300, demand: 1.25, tolerance: 1.3,  rent: 600, supply: 1.2,  climate: 'hot',   blurb: 'The state fair. Huge crowds, huge rent.' },
-    { id: 'neon',     name: 'Neon Bay',         x: 0.10, y: 0.20, traffic: 380, demand: 1.05, tolerance: 1.85, rent: 780, supply: 1.25, climate: 'mild',  blurb: 'The glittering metropolis. Only for the bold.' }
+    { id: 'maple',    name: 'Maple Falls',      x: 0.62, y: 0.40, traffic: 60,  demand: 1.0,  tolerance: 1.0,  rent: 20,  supply: 1.0,  climate: 'mild',  blurb: 'A friendly little town. Cheap, but quiet.' },
+    { id: 'pines',    name: 'Pinecrest',        x: 0.34, y: 0.30, traffic: 90,  demand: 0.75, tolerance: 1.2,  rent: 25,  supply: 1.1,  climate: 'cool',  blurb: 'Mountain hikers. Cool air, low thirst.' },
+    { id: 'dust',     name: 'Dustwater Springs',x: 0.22, y: 0.66, traffic: 80,  demand: 1.2,  tolerance: 1.5,  rent: 90,  supply: 1.35, climate: 'hot',   blurb: 'Desert town. Few people, all of them parched.' },
+    { id: 'sunport',  name: 'Sunport Beach',    x: 0.80, y: 0.78, traffic: 160, demand: 1.25, tolerance: 1.2,  rent: 170, supply: 1.05, climate: 'hot',   blurb: 'Boardwalk crowds and sunshine.' },
+    { id: 'harbor',   name: 'Harbor City',      x: 0.88, y: 0.32, traffic: 260, demand: 1.0,  tolerance: 1.4,  rent: 240, supply: 1.0,  climate: 'mild',  blurb: 'Busy docks and office towers.' },
+    { id: 'capitol',  name: 'Capitol Heights',  x: 0.70, y: 0.16, traffic: 300, demand: 0.9,  tolerance: 1.65, rent: 300, supply: 1.1,  climate: 'mild',  blurb: 'Big spenders, big rent.' },
+    { id: 'bloom',    name: 'Bloomfield Fair',  x: 0.40, y: 0.84, traffic: 300, demand: 1.25, tolerance: 1.5,  rent: 450, supply: 1.2,  climate: 'hot',   blurb: 'The state fair. Huge crowds, huge rent.' },
+    { id: 'neon',     name: 'Neon Bay',         x: 0.10, y: 0.20, traffic: 420, demand: 1.05, tolerance: 2.15, rent: 900, supply: 1.25, climate: 'mild',  blurb: 'The glittering metropolis. Only for the bold.' }
   ];
 
   // Customisation. cost 0 = free; appeal = extra customers (summed per target, capped at appealCap);
@@ -579,7 +583,7 @@
   // "Mom Got Groceries!": a rare mid-day surprise. Each item rolls in or out (at least two come), with a big random amount (units).
   DATA.groceries = {
     chance: 0.13, firstDay: 3, gap: 4, eta: 4.5,
-    items: { lemons: [40, 110], sugar: [30, 90], ice: [25, 80], cups: [50, 140] },
+    items: { lemons: [40, 110], sugar: [30, 90], ice: [90, 300], cups: [60, 180] },
     keep: 0.7                   // chance each item type is in the bags
   };
 
@@ -703,7 +707,8 @@
    *   startPrep()                 roll market, forecast and event for state.day; phase 'prep'
    *   setCart(item, packs)        clamps to what cash allows; emits 'cart'
    *   cartCost() -> number
-   *   prepInfo() -> { cost, cashAfter, rent, stockAfter:{...units}, maxCups, limiting, costPerCup, canStart, reason }
+   *   prepInfo() -> { cost, cashAfter, rent, stockAfter:{...units}, maxCups, limiting, costPerCup, canStart, reason,
+   *                   truckRent, truckShut, truckCity }   cashAfter also takes off the truck's rent unless the cart leaves too little for it (truckShut)
    *   setRecipe(key, value)       emits 'recipe'
    *   setPrice(p)                 allowed in prep and during the day; emits 'price'
    *   setFlavor(id)

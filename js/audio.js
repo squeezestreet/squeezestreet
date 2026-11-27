@@ -9,6 +9,7 @@
  *                              pop hm grumble chirp low trombone fanfare win chaching jingle chime thunder spend blip
  *                              welcome streak crack shield farewell loyal powerup
  *                              dexroll brake latch plink neon tada rolloff (Dex setting up: 'dealer:setup')
+ *                              groceries mom horn truckbuy travel paint equip rent (truck, customising, Mom's groceries)
  * }
  * Listens to the bus by itself (sales, bells, weather, phases, settings, pause) and runs the
  * generative music and the location / weather ambience on a lookahead scheduler.
@@ -371,11 +372,55 @@
       for (var i = 0, at = t + 1.08; i < 6; i++, at += Math.max(0.06, 0.2 - i * 0.03)) tone(m, d, 'triangle', (150 + rnd() * 30) * v, at, 0.06, 0.14 * (1 - i / 7), { to: 70, a: 0.003 });
     }
   };
+  // food truck, customising, Mom's groceries
+  SFX.groceries = function (m, d, t, v) {               // "Mom got groceries!": a bouncy shopping-bag jingle that lands on a bright chord
+    [[72, 0], [76, 0.1], [79, 0.2], [84, 0.3], [79, 0.45], [84, 0.55]].forEach(function (n) { pluck(m, d, mtof(n[0] - 7) * v, t + n[1], 0.2, 0.2); });
+    [65, 69, 72, 77].forEach(function (n) { brass(m, d, mtof(n) * v, t + 0.7, 0.6, 0.08); });
+    bell(m, d, t + 0.7, mtof(89) * v, 0.6, 0.1);
+    sparkle(m, d, t + 0.75, 6, 0.5, 0.045);
+  };
+  SFX.mom = function (m, d, t, v) {                     // a little car: beep beep
+    [0, 0.2].forEach(function (at) {
+      tone(m, d, 'square', 494 * v, t + at, 0.13, 0.09, { a: 0.008, hold: 0.07, flt: ['lowpass', 1800, 1] });
+      tone(m, d, 'square', 622 * v, t + at, 0.13, 0.07, { a: 0.008, hold: 0.07, flt: ['lowpass', 1800, 1] });
+    });
+  };
+  SFX.horn = function (m, d, t, v) {                    // the truck: a deep two-tone honk
+    [[0, 0.16], [0.24, 0.42]].forEach(function (h) {
+      tone(m, d, 'sawtooth', 233 * v, t + h[0], h[1], 0.12, { a: 0.015, hold: h[1] * 0.6, flt: ['lowpass', 1100, 1.2] });
+      tone(m, d, 'sawtooth', 294 * v, t + h[0], h[1], 0.1, { a: 0.015, hold: h[1] * 0.6, flt: ['lowpass', 1100, 1.2] });
+    });
+  };
+  SFX.travel = function (m, d, t, v) {                  // engine turns over, revs up, pulls away
+    tone(m, d, 'sawtooth', 55 * v, t, 1.2, 0.2, { to: 150 * v, glide: 0.55, a: 0.05, hold: 0.4, flt: ['lowpass', 600, 2] });
+    tone(m, d, 'square', 28 * v, t, 1.2, 0.12, { to: 75 * v, glide: 0.55, a: 0.05, hold: 0.4, flt: ['lowpass', 300, 1] });
+    hiss(m, d, 'lowpass', 300, t, 1.3, 0.3, { to: 140, a: 0.1, hold: 0.5 });
+  };
+  SFX.truckbuy = function (m, d, t, v) { SFX.fanfare(m, d, t, v); SFX.horn(m, d, t + 1.05, v); };
+  SFX.paint = function (m, d, t, v) {                   // two quick shakes of a spray can, then the spray
+    tone(m, d, 'triangle', 1900 * v, t, 0.03, 0.08, { a: 0.002 });
+    tone(m, d, 'triangle', 2300 * v, t + 0.08, 0.03, 0.08, { a: 0.002 });
+    hiss(m, d, 'highpass', 4200, t + 0.16, 0.42, 0.35, { a: 0.03, hold: 0.2 });
+    hiss(m, d, 'bandpass', 7000, t + 0.16, 0.4, 0.15, { q: 0.8, a: 0.03 });
+  };
+  SFX.equip = function (m, d, t, v) {                   // it snaps into place: pop and a bright pluck
+    tone(m, d, 'sine', 300 * v, t, 0.1, 0.3, { to: 900 * v, glide: 0.06 });
+    pluck(m, d, 1047 * v, t + 0.05, 0.2, 0.14);
+  };
+  SFX.rent = function (m, d, t, v) {                    // a soft coin going out: two falling tings
+    bell(m, d, t, 1568 * v, 0.25, 0.08, TING);
+    bell(m, d, t + 0.09, 1175 * v, 0.3, 0.06, TING);
+  };
   var LEVEL = { latch: 2.2, tada: 0.8, neon: 0.85, welcome: 0.7, farewell: 0.6, pour: 0.7, error: 0.6, bell: 0.7, ding: 0.85, trombone: 0.62, fanfare: 0.7, win: 0.7, chaching: 0.9, chime: 0.75, thunder: 0.75, grumble: 0.8, low: 0.75, hm: 0.6 };                                                                  // per-effect trim, tuned from the offline loudness table
   var VAR = { plink: 0, tada: 0, neon: 0.02, streak: 0, welcome: 0.02, trombone: 0, fanfare: 0, win: 0, chaching: 0, jingle: 0, chime: 0, bell: 0, thunder: 0, coin: 0.02, tally: 0.02, pop: 0.14, hm: 0.16, grumble: 0.14 };   // random pitch spread (default 0.05)
   var GAP = { tick: 0.03, tally: 0.035, pop: 0.09, hm: 0.7, grumble: 0.35, chirp: 0.8, low: 0.8, coin: 0.06, tip: 0.07, ting: 0.1, squish: 0.07, blip: 0.2, whoosh: 0.15, pour: 0.12, spend: 0.15, thunder: 2, welcome: 0.3, streak: 0.15, crack: 0.25, shield: 0.3, farewell: 0.6, loyal: 0.08, powerup: 0.25 };   // min seconds between repeats (default 0.04)
   var ECHO = { tada: 1, neon: 1, welcome: 1, streak: 1, shield: 1, bell: 1, chime: 1, fanfare: 1, win: 1, ding: 1, chaching: 1, jingle: 1, tip: 1, ting: 1 };
   var DUCK = { tada: 0.6, fanfare: 1.3, win: 3.4, jingle: 0.9, chime: 1.1, trombone: 1.5, chaching: 0.5 };   // seconds the music steps back
+  LEVEL.groceries = 0.8; LEVEL.truckbuy = 0.7; LEVEL.travel = 0.6; LEVEL.paint = 0.45; LEVEL.horn = 0.85; LEVEL.rent = 1.6;   // paint is frequent and rent routine: kept under the coin
+  VAR.groceries = 0; VAR.truckbuy = 0; VAR.horn = 0.02; VAR.mom = 0.02;
+  GAP.paint = 0.25; GAP.equip = 0.08; GAP.rent = 0.2; GAP.mom = 1; GAP.horn = 0.6; GAP.travel = 1;
+  ECHO.groceries = 1; ECHO.horn = 1; ECHO.truckbuy = 1; ECHO.mom = 1;
+  DUCK.groceries = 1.4; DUCK.truckbuy = 2.4;
 
   /** Build one effect at time t. Shared by play() and the offline tests. */
   function fire(m, name, t, o) {
@@ -763,7 +808,11 @@
   say('day:start', 'jingle', { delay: 0.25 });          // lets the phase whoosh go first
   say('day:end', 'chime', { delay: 0.1 });
   on('weather:change', function (p) { if (p.type === 'storm') play('thunder'); });
-  on('cash', function (p) { if (p.delta < 0 && !/^(upgrade|location|flavor|dealer|deal|boost|limited)$/.test(p.reason)) play('spend'); });   // those already cha-ching
+  on('cash', function (p) {
+    if (!(p.delta < 0)) return;
+    if (p.reason === 'rent' || p.reason === 'fuel') play('rent');
+    else if (!/^(upgrade|location|flavor|dealer|deal|boost|limited|truck|fuel|custom)$/.test(p.reason)) play('spend');   // those already have their own cue
+  });
   // regulars and Dex the Dealer
   say('regular:new', 'welcome');
   on('regular:streak', function (p) { play('streak', { streak: p.streak }); });
@@ -783,6 +832,15 @@
     else if (p.step === 'ready') play('tada');
     else if (p.step === 'leave' && !red) play('rolloff');
   });
+  // food truck, customising, Mom's groceries
+  var lastPaint = -9;
+  on('truck:buy', function () { play('truckbuy'); });
+  on('truck:depart', function () { play('travel'); });
+  on('truck:arrive', function () { play('horn'); });
+  on('custom:buy', function () { lastPaint = ctx ? ctx.currentTime : 0; play('paint'); });
+  on('custom:set', function () { play('equip', { delay: ctx && ctx.currentTime - lastPaint < 0.2 ? 0.3 : 0 }); });   // after the spray when bought and put on at once
+  say('groceries:incoming', 'mom');
+  say('groceries', 'groceries');
   on('toast', function (p) { play('blip', { kind: p.kind }); });
   on('phase', function (p) {
     if (!MOODS[p.to] || p.to === mood) return;

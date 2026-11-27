@@ -57,6 +57,18 @@
     if (SS.Screens && SS.Screens.open) { try { SS.Screens.open(name); } catch (e) { warn('Screens.open', e); } }
     else refuse(null, 'That screen is still being set up.');
   }
+  /* Squeezy, the mascot, as a little sticker in the UI: an <img> of the mark (its SVG ids stay out of the page).
+   * Poses (css/ui.css): talk cheer wow sad sleep. */
+  var SQ_SRC = '';
+  function squeezy(pose) {
+    if (!SQ_SRC && SS.Mascot && SS.Mascot.svg) SQ_SRC = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(SS.Mascot.svg);
+    return h('span', { class: 'sq sq--' + (pose || 'talk'), 'aria-hidden': 'true' }, SQ_SRC ? h('img', { src: SQ_SRC, alt: '', draggable: 'false' }) : ico('lemon'));
+  }
+  function oneOf(a) { return a[Math.floor(Math.random() * a.length)]; }
+  var PAUSE_LINES = ['Squeezy is taking a juice break too.', 'Even lemons need a breather.', 'Ahh, a little shade. Take your time.', 'Squeezy is guarding the pitcher. Nobody sips.'];
+  var GROC_LINES = ['A big restock just landed at the stand.', 'She said she was just popping out. Look at all this!', 'Mom always knows what we need.'];
+  /** the food truck button appears once the truck is for sale or owned */
+  function truckShown() { var s = SS.state; return !!(s && (s.truck || sim('truckUnlocked'))); }
 
   /* ------------------------------------------------------------------ *
    * HUD
@@ -96,7 +108,10 @@
       function () { openScreen('dealer'); }, { hidden: true });
 
     hud.snd = btn('btn btn--icon', null, toggleSound);
+    hud.truck = btn('btn btn--icon hud-truck', ico('truck'), function () { openScreen('campaign'); }, { 'aria-label': 'Food truck', title: 'Food truck', hidden: !truckShown() });
     hud.btns = h('div', { class: 'hud-btns' },
+      hud.truck,
+      btn('btn btn--icon', ico('brush'), function () { openScreen('custom'); }, { 'aria-label': 'Customise', title: 'Customise' }),
       btn('btn btn--icon', ico('trophy'), function () { openScreen('goals'); }, { 'aria-label': 'Goals', title: 'Goals' }),
       hud.snd,
       btn('btn btn--icon', ico('gear'), openSettings, { 'aria-label': 'Settings', title: 'Settings' }));
@@ -151,6 +166,8 @@
       var items = [menuItem('trophy', 'Goals', function () { openScreen('goals'); })];
       if (phase === 'day') items.push(menuItem('pause', 'Pause', function () { SS.setPaused(true); }));
       else items.push(menuItem('map', 'Map', function () { openScreen('map'); }));
+      items.push(menuItem('brush', 'Customise', function () { openScreen('custom'); }));
+      if (truckShown()) items.push(menuItem('truck', 'Food truck', function () { openScreen('campaign'); }));
       items.push(menuItem(soundOn() ? 'sound' : 'mute', soundOn() ? 'Sound is on' : 'Sound is off', toggleSound));
       items.push(menuItem('gear', 'Settings', openSettings));
       hud.menu.replaceChildren.apply(hud.menu, items);
@@ -269,7 +286,7 @@
     bar.pitMeter = h('div', { class: 'meter daybar-pit-meter' }, h('i'));
     bar.pit = h('div', { class: 'daybar-pit', title: 'Cups left in the pitcher' }, ico('pitcher'),
       h('div', { class: 'daybar-pit-col' }, bar.pitNum, bar.pitMeter), h('span', { class: 'hud-sr' }, ' cups in the pitcher'));
-    bar.stock = ITEMS.map(function (it) { return stat(D.items[it].icon, D.items[it].name + ' left'); });
+    bar.stock = ITEMS.map(function (it) { var c = stat(D.items[it].icon, D.items[it].name + ' left'); c.el.dataset.stock = it; return c; });   // data-stock: fx.js flies groceries here
     bar.line = stat('people', 'in line');
     bar.sold = stat('drink', 'cups sold today', 'daybar-sold');
     bar.take = stat('cash', 'taken today', 'daybar-take');
@@ -391,6 +408,7 @@
   function key(k) { return h('kbd', { class: 'pause-key' }, k); }
   function buildPause() {
     pause.card = h('div', { class: 'pause-card panel', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'pause-title', tabindex: '-1' },
+      h('div', { class: 'pause-sq' }, squeezy('sleep'), pause.sqLine = h('p', { class: 'pause-sq-line' })),
       h('h2', { class: 'pause-title display', id: 'pause-title' }, 'Paused'),
       h('p', { class: 'pause-text' }, 'The whole street is holding still. Nothing moves until you are back.'),
       btn('btn btn--go btn--lg btn--block', [ico('play'), 'Resume'], function () { SS.setPaused(false); }),
@@ -407,6 +425,7 @@
     var show = !!(p && p.paused) && phase === 'day' && !layers.length;
     if (show === !pause.el.hidden) return;
     pause.el.hidden = !show;
+    if (show) put(pause.sqLine, oneOf(PAUSE_LINES));
     toggleMenu(false);
     // focus the card itself, not a button, so main.js still hears Space and P
     if (show) { try { pause.card.focus({ preventScroll: true }); } catch (e) { /* focus is a nicety */ } }
@@ -636,7 +655,8 @@
     for (i = 0; i < toasts.length; i++) if (toasts[i].text === text) t = toasts[i];
     if (t) { clearTimeout(t.timer); anim(t.el, BUMP, 260); }       // the same message again: just keep it up longer
     else {
-      t = { text: text, timer: 0, el: h('div', { class: 'toast toast--' + (kind === 'good' || kind === 'bad' ? kind : 'info') }, icon ? ico(icon) : null, h('span', null, text)) };
+      t = { text: text, timer: 0, el: h('div', { class: 'toast toast--' + (kind === 'good' || kind === 'bad' ? kind : 'info') + (icon === 'squeezy' ? ' toast--sq' : '') },
+        icon === 'squeezy' ? squeezy('talk') : icon ? ico(icon) : null, h('span', null, text)) };
       toasts.push(t);
       R.toast.append(t.el);
       if (toasts.length > 3) dropToast(toasts[0]);
@@ -665,15 +685,18 @@
     while (bannersLive < 1 && bannerQ.length && !layers.length) showBanner(bannerQ.shift());
   }
   function showBanner(o) {
-    var gen = bannerGen, ms = bannerQ.length > 1 ? 2200 : o.goal ? 4200 : 3400;
+    var gen = bannerGen, ms = o.ms || (bannerQ.length > 1 ? 2200 : o.goal ? 4200 : 3400);
     var el = h('div', { class: 'banner banner--' + (o.kind || 'news') + (o.goal ? ' banner--goal' : '') },
-      h('span', { class: 'banner-ico' }, ico(o.icon || 'star')),
+      h('span', { class: 'banner-ico' }, ico(o.icon || 'star'), o.badge ? ico(o.badge, 'banner-badge') : null),
       h('span', { class: 'banner-text' },
         o.label ? h('span', { class: 'label' }, o.label) : null,
         h('b', { class: 'banner-title' + (o.goal ? ' display' : '') }, o.title),
-        o.desc ? h('span', { class: 'banner-desc' }, o.desc) : null),
+        o.desc ? h('span', { class: 'banner-desc' }, o.desc) : null,
+        o.chips && o.chips.length ? h('span', { class: 'banner-chips' }, o.chips.map(function (c, i) { return h('span', { class: 'chip num banner-chip', style: '--i:' + i }, ico(c.icon), c.text); })) : null),
       o.reward > 0 ? h('span', { class: 'banner-reward display num' }, '+' + SS.fmtMoney(o.reward)) : null,
-      o.pill ? h('span', { class: 'banner-reward banner-pill display num' }, o.pill) : null);
+      o.pill ? h('span', { class: 'banner-reward banner-pill display num' }, o.pill) : null,
+      o.sq ? squeezy(o.sq) : null);
+    if (o.sq) el.classList.add('has-sq');
     bannersLive++;
     R.banner.append(el);
     setTimeout(function () {
@@ -716,7 +739,20 @@
   }
   function onMilestone(p) {
     p = p || {};
-    banner({ icon: 'trophy', label: 'Goal complete', title: p.title || 'Nicely done', reward: Number(p.reward) || 0, kind: 'goal', goal: true });
+    banner({ icon: 'trophy', label: 'Goal complete', title: p.title || 'Nicely done', reward: Number(p.reward) || 0, kind: 'goal', goal: true, sq: 'cheer' });
+  }
+
+  /* "Mom Got Groceries!": a beep-beep heads-up, then the big banner listing what she brought (fx.js flies it to the stock) */
+  function onGroceriesIncoming(p) {
+    var st = SS.state, sp = (st && st.settings && st.settings.speed) || 1, eta = Number(p && p.eta) || 0;
+    // gone before the bags land, so the big banner can follow at once
+    banner({ kind: 'groc-ping', icon: 'bag', title: 'Beep beep! Mom is on her way with groceries!', ms: SS.clamp(eta * 1000 / sp - 450, 1000, 2600) });
+  }
+  function onGroceries(p) {
+    var items = (p && p.items) || {}, chips = [];
+    ITEMS.forEach(function (it) { var n = Math.floor(Number(items[it]) || 0); if (n > 0) chips.push({ icon: D.items[it].icon, text: '+' + n + ' ' + itemName(it) }); });
+    if (!chips.length) return;
+    banner({ kind: 'groc', icon: 'bag', badge: 'heart', label: 'Special delivery', title: 'Mom Got Groceries!', desc: oneOf(GROC_LINES), chips: chips, sq: 'cheer', ms: 5200 });
   }
 
   /* Regulars and Dex the Dealer */
@@ -772,7 +808,7 @@
     if (!info || !info.present || !Array.isArray(info.offers)) return;
     info.offers.forEach(function (o) { if (o.kind === 'limited' && !o.sold) lim = o; });
     if (lim) banner({ icon: 'dealer', label: 'Dex has a limited edition today', title: lim.name, desc: 'Only from Dex. Tap Deals to see it.', kind: 'dex' });
-    else if (!first) toast('Dex rolled into town today with fresh boosts.', 'info', 'dealer');
+    else if (!first) toast('Psst! Dex rolled into town today with fresh boosts.', 'info', 'squeezy');
   }
 
   /* ------------------------------------------------------------------ *
@@ -864,8 +900,8 @@
     var last = coach.i === steps.length - 1;
     coach.node = node;
     coach.ring = h('div', { class: 'coach-ring', 'aria-hidden': 'true' });
-    coach.el = h('div', { class: 'coach-bubble', role: 'status' },
-      h('p', { class: 'coach-text' }, step.text),
+    coach.el = h('div', { class: 'coach-bubble has-sq', role: 'status' },
+      squeezy('talk'), h('p', { class: 'coach-text' }, step.text),
       h('div', { class: 'coach-foot' }, btn('coach-skip', 'Skip tips', tutFinish), btn('btn btn--primary', last ? 'Got it' : 'Next', tutNext)),
       h('i', { class: 'coach-arrow' }));
     R.coach.append(coach.ring, coach.el);
@@ -1059,8 +1095,11 @@
     SS.on('event:trigger', onEvent);
     SS.on('soldout', onSoldOut);
     SS.on('location:unlock', onUnlock);
+    ['phase', 'location:unlock', 'truck:buy'].forEach(function (e) { SS.on(e, function () { if (hud.truck) hud.truck.hidden = !truckShown(); }); });
     SS.on('upgrade:buy', onUpgrade);
     SS.on('milestone', onMilestone);
+    SS.on('groceries:incoming', onGroceriesIncoming);
+    SS.on('groceries', onGroceries);
     SS.on('regular:new', onRegNew);
     SS.on('regular:lost', onRegLost);
     SS.on('regular:streak', onRegStreak);
@@ -1094,6 +1133,7 @@
     toast: toast,
     confirm: confirmBox,
     openSettings: openSettings,
-    openHowTo: openHowTo
+    openHowTo: openHowTo,
+    squeezy: squeezy
   };
 })();

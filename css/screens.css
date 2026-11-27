@@ -199,7 +199,8 @@
 
 .res-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s4); }
 @container res (min-width: 640px) {
-  .res-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "hero hours" "hero crowd" "rep rep" "regs regs" "reviews reviews" "after after"; gap: var(--s4) var(--s5); align-items: start; }
+  /* rows auto 1fr: a tall hero (the truck's lines) stretches the crowd's row, not the gap under the hours */
+  .res-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: auto 1fr; grid-template-areas: "hero hours" "hero crowd" "rep rep" "regs regs" "reviews reviews" "after after"; gap: var(--s4) var(--s5); align-items: start; }
   .res-hero { grid-area: hero; }
   .res-hours { grid-area: hours; }
   .res-crowd { grid-area: crowd; }
@@ -733,3 +734,290 @@
 .legal-date { margin: 0; font-size: var(--fs-sm); font-weight: 700; color: var(--ink-soft); }
 .legal-h { margin: 0 0 8px; font-size: var(--fs-lg); }
 .legal-list { margin: 0; padding-left: 1.2em; display: grid; gap: 8px; font-size: var(--fs-md); line-height: 1.45; }
+
+/* ====================================================================== *
+ * Food truck: showroom, campaign map, prep card, results lines
+ * ====================================================================== */
+.camp { container-type: inline-size; display: flex; flex-direction: column; gap: var(--s4); min-width: 0; }
+.camp-own, .camp-shop { display: flex; flex-direction: column; gap: var(--s4); min-width: 0; }
+.camp-cv { display: block; width: 100%; height: 100%; }
+.camp-fs { margin: 0; padding: 0; border: 0; min-width: 0; }
+.camp-fs:disabled { opacity: .55; }
+.camp-req { white-space: normal; text-align: left; }
+
+/* showroom */
+.camp-show { position: relative; display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: var(--s4); padding: var(--s3); }
+.camp-show-art { aspect-ratio: 16 / 10; align-self: start; overflow: hidden; background: #bfe9ff; border: var(--line) solid var(--ink); border-radius: var(--r-md); }
+.camp-show-main { display: flex; flex-direction: column; gap: var(--s2); min-width: 0; }
+.camp-show-title { margin: 0; font-size: var(--fs-xl); line-height: 1.1; }
+.camp-show-p { margin: 0; line-height: 1.4; }
+.camp-show-facts { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: var(--fs-sm); font-weight: 700; }
+.camp-show-facts li { display: flex; align-items: center; gap: 8px; }
+.camp-show-facts .ico { flex: 0 0 auto; width: 24px; height: 24px; }
+.camp-show-buy { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s3); margin-top: var(--s1); }
+.camp-show-price { display: flex; flex-direction: column; line-height: 1.1; }
+.camp-show-price b { font-size: var(--fs-2xl); }
+.camp-show-reqs { flex: 1 1 160px; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0; }
+.camp-buy { flex: 1 1 100%; }
+.camp-buy[aria-disabled="true"] { --btn-bg: #e6e8f4; color: #6b7095; }
+@container (max-width: 620px) { .camp-show { grid-template-columns: minmax(0, 1fr); } }
+
+/* status bar: where the truck is, open / park, price, bring it home */
+.camp-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s3); padding: var(--s3); }
+.camp-status { flex: 1 1 260px; display: flex; align-items: center; gap: var(--s3); min-width: 0; }
+.camp-status-ico { flex: 0 0 auto; display: grid; place-items: center; width: 56px; height: 56px; background: var(--lemon-pale); border: var(--line) solid var(--ink); border-radius: 16px; box-shadow: 0 3px 0 var(--ink); }
+.camp-status-ico .ico { width: 42px; height: 42px; }
+.camp-status-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
+.camp-status-t { font-size: var(--fs-md); font-weight: 900; }
+.camp-status-s { font-size: var(--fs-sm); color: var(--ink-soft); }
+.camp-ctl, .prep-truck-ctl { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s3); }
+.camp-price { display: flex; align-items: center; gap: var(--s2); }
+.camp-price .stepper-btn { width: 36px; height: 36px; }
+.camp-price .stepper-val { min-width: 4.2ch; font-size: var(--fs-md); }
+.camp-home .ico { width: 20px; height: 20px; }
+.camp-switch { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 4px 14px 4px 4px; font: 800 var(--fs-sm) var(--font-body); color: var(--ink); background: #e6e8f4; border: var(--line) solid var(--ink); border-radius: 999px; box-shadow: 0 3px 0 var(--ink); cursor: pointer; }
+.camp-switch-knob { position: relative; width: 46px; height: 28px; flex: 0 0 auto; background: #c9cde6; border: 2px solid var(--ink); border-radius: 999px; transition: background .2s var(--swift); }
+.camp-switch-knob::after { content: ''; position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; background: #fff; border: 2px solid var(--ink); border-radius: 50%; transition: transform .22s var(--spring); }
+.camp-switch[aria-checked="true"] { background: #c9f5dc; }
+.camp-switch[aria-checked="true"] .camp-switch-knob { background: var(--leaf); }
+.camp-switch[aria-checked="true"] .camp-switch-knob::after { transform: translateX(18px); }
+.camp-switch:disabled { opacity: .55; cursor: not-allowed; }
+.camp-switch:focus-visible { outline: 3px solid var(--grape); outline-offset: 3px; }
+.camp-note { margin: 0; display: flex; align-items: flex-start; gap: 6px; padding: var(--s2) var(--s3); font-size: var(--fs-sm); font-weight: 700; line-height: 1.35; background: #cdeeff; border: 2px solid var(--ink); border-radius: var(--r-sm); }
+.camp-note .ico { flex: 0 0 auto; width: 20px; height: 20px; }
+
+/* map + the picked town */
+/* wide: the book fills the space under the map while the town card runs down the right; narrow: map, town, book */
+.camp-main { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); grid-template-rows: auto 1fr; gap: var(--s4); align-items: start; }
+.camp-main > .camp-city { grid-column: 2; grid-row: 1 / span 2; }
+.camp-main > .camp-book { grid-column: 1; grid-row: 2; grid-template-columns: minmax(0, 1fr); }
+@container (max-width: 700px) { .camp-main { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; } .camp-main > .camp-city, .camp-main > .camp-book { grid-column: auto; grid-row: auto; } }
+.camp-map-box { min-width: 0; }
+.camp-map { position: relative; isolation: isolate; aspect-ratio: 400 / 260; overflow: hidden; border: var(--line) solid var(--ink); border-radius: var(--r-md); box-shadow: var(--drop); background: #8fd3ff; }
+.camp-svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.camp-roads { opacity: .9; }
+.camp-plan { animation: camp-march 1s linear infinite; }
+@keyframes camp-march { to { stroke-dashoffset: -15; } }
+.camp-pin { position: absolute; z-index: 2; display: flex; flex-direction: column; align-items: center; width: 0; height: 0; padding: 0; background: none; border: 0; cursor: pointer; }
+.camp-pin-dot { position: absolute; bottom: -3px; left: -15px; width: 30px; height: 34px; display: block; transform-origin: 50% 100%; transition: transform .18s var(--spring); }
+.camp-pin-dot .ico { width: 100%; height: 100%; display: block; }
+.camp-pin.is-home .camp-pin-dot { left: -16px; width: 32px; height: 32px; bottom: -12px; }
+.camp-pin-l { position: absolute; top: 4px; left: 0; transform: translateX(-50%); padding: 1px 7px; font-size: .72rem; font-weight: 800; line-height: 1.3; white-space: nowrap; background: rgba(255, 255, 255, .9); border: 2px solid var(--ink); border-radius: 999px; }
+.camp-pin.is-home .camp-pin-l { top: 14px; }
+.camp-pin:hover .camp-pin-dot { transform: translateY(-3px) scale(1.08); }
+.camp-pin.is-sel { z-index: 4; }
+.camp-pin.is-sel .camp-pin-dot { transform: scale(1.3); }
+.camp-pin.is-sel .camp-pin-l { background: var(--lemon); }
+.camp-pin.is-dest .camp-pin-l { background: #ffd3cf; }
+.camp-pin.is-visited:not(.is-sel) .camp-pin-dot { filter: saturate(.55); }
+.camp-pin:focus-visible { outline: none; }
+.camp-pin:focus-visible .camp-pin-l { outline: 3px solid var(--grape); outline-offset: 2px; }
+.camp-marker { position: absolute; z-index: 3; width: 0; height: 0; pointer-events: none; transition: left .6s var(--swift), top .6s var(--swift); }
+.camp-marker-in { position: absolute; left: -21px; top: -21px; display: grid; place-items: center; width: 42px; height: 42px; background: #fff; border: var(--line) solid var(--ink); border-radius: 50%; box-shadow: 0 3px 0 var(--ink); animation: camp-bob 1.6s ease-in-out infinite; }
+.camp-marker-in .ico { width: 30px; height: 30px; }
+.camp-marker.is-parked .camp-marker-in { left: -48px; top: -34px; }   /* up and left of the pin, clear of its label and the towns east of home */
+.camp-marker.is-flip .ico { transform: scaleX(-1); }
+.camp-marker.is-moving .camp-marker-in { animation-duration: .5s; }
+@keyframes camp-bob { 0%, 100% { transform: translateY(0) rotate(-2deg); } 50% { transform: translateY(-3px) rotate(2deg); } }
+.camp-pin-s { display: none; }
+@container (max-width: 560px) {
+  .camp-pin:not(.is-sel):not(.is-here):not(.is-dest) .camp-pin-l { display: none; }
+  .camp-pin:not(.is-sel):not(.is-here):not(.is-dest) .camp-pin-s { position: absolute; top: 3px; left: 0; transform: translateX(-50%); display: block; padding: 0 4px; font-size: .62rem; font-weight: 900; line-height: 1.35; background: rgba(255, 255, 255, .9); border: 2px solid var(--ink); border-radius: 999px; pointer-events: none; }
+  .camp-pin::before { content: ''; position: absolute; left: -22px; top: -34px; width: 44px; height: 44px; border-radius: 50%; }   /* a finger-sized target round the small pin */
+  .camp-pin-dot { left: -12px; width: 24px; height: 28px; }
+  .camp-marker-in { left: -16px; top: -16px; width: 32px; height: 32px; }
+  .camp-marker-in .ico { width: 22px; height: 22px; }
+  .camp-marker.is-parked .camp-marker-in { left: -36px; top: -28px; }
+}
+
+.camp-city { position: relative; display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
+.camp-postcard { position: relative; aspect-ratio: 16 / 9; background: #bfe9ff; border-bottom: var(--line) solid var(--ink); }
+.camp-city-tag { position: absolute; top: 8px; left: 8px; }
+.camp-city-body { display: flex; flex-direction: column; gap: var(--s2); padding: var(--s3); }
+.camp-city-name { margin: 0; font-size: var(--fs-xl); line-height: 1.1; }
+.camp-city-blurb { margin: 0; font-size: var(--fs-sm); color: var(--ink-soft); line-height: 1.35; }
+.camp-stats { margin: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px var(--s3); }
+.camp-stat { min-width: 0; }
+.camp-stat dt { display: flex; align-items: center; gap: 5px; font-size: var(--fs-xs); font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-soft); }
+.camp-stat dt .ico { width: 18px; height: 18px; }
+.camp-stat dd { margin: 0; display: flex; flex-direction: column; gap: 3px; font-size: var(--fs-sm); }
+.camp-meter { height: 10px; }
+.camp-wx { display: flex; align-items: center; gap: var(--s2); padding: 6px 10px; background: #cdeeff; border: 2px solid var(--ink); border-radius: var(--r-sm); }
+.camp-wx-ico .ico { width: 34px; height: 34px; }
+.camp-wx > div { display: flex; flex-direction: column; line-height: 1.2; }
+.camp-wx-sure { margin-left: auto; flex: none; }
+.camp-est { display: flex; flex-direction: column; gap: 4px; padding: var(--s2) var(--s3); background: var(--paper-2); border: 2px solid var(--ink-faint); border-radius: var(--r-sm); }
+.camp-est p { margin: 0; font-size: var(--fs-sm); line-height: 1.35; }
+.camp-est-top { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); }
+.camp-est-range { font-size: var(--fs-lg); }
+.camp-est.is-good { background: #e3f8ec; border-color: var(--leaf); }
+.camp-est.is-good .camp-verdict { background: #c9f5dc; }
+.camp-est.is-meh { background: var(--lemon-pale); border-color: var(--lemon-deep); }
+.camp-est.is-meh .camp-verdict { background: var(--lemon); }
+.camp-est.is-bad { background: #ffe9e6; border-color: var(--coral); }
+.camp-est.is-bad .camp-verdict { background: #ffd3cf; }
+.camp-est.is-bad .camp-est-range { color: var(--bad); }
+.camp-go { width: 100%; }
+.camp-go .ico { width: 26px; height: 26px; }
+
+/* the campaign book: totals and town stamps */
+.camp-book { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--s4); }
+@container (max-width: 700px) { .camp-book { grid-template-columns: minmax(0, 1fr); } }
+.camp-book-part { display: flex; flex-direction: column; gap: var(--s2); min-width: 0; }
+.camp-totals { margin: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--s2); }
+.camp-total:last-child { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: var(--s2); }   /* profit: the bottom line, full width */
+@container (max-width: 560px) { .camp-totals { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.camp-total { padding: 8px 10px; background: var(--paper-2); border: 2px solid var(--ink-faint); border-radius: var(--r-sm); }
+.camp-total dt { display: flex; align-items: center; gap: 5px; font-size: var(--fs-xs); font-weight: 800; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-soft); }
+.camp-total dt .ico { width: 16px; height: 16px; }
+.camp-total dd { margin: 0; font-size: var(--fs-lg); }
+.camp-stamps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); gap: var(--s2); }
+.camp-stamp { display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center; }
+.camp-stamp-ring { display: grid; place-items: center; width: 54px; height: 54px; color: #9aa0c4; border: 3px dashed #b9bdd8; border-radius: 50%; transform: rotate(var(--r, 0deg)); }
+.camp-stamp-ring b { font-size: var(--fs-md); }
+.camp-stamp.is-on .camp-stamp-ring { color: var(--coral-deep); background: #fff0ee; border: 3px double var(--coral-deep); animation: ss-pop-in .4s var(--spring) both; animation-delay: calc(var(--i, 0) * 50ms); }
+.camp-stamp-l { font-size: var(--fs-xs); font-weight: 800; line-height: 1.15; color: var(--ink-soft); }
+.camp-stamp.is-on .camp-stamp-l { color: var(--ink); }
+
+/* prep card */
+.prep-truck-slot { min-width: 0; }
+.prep-truck { display: flex; flex-direction: column; gap: var(--s2); padding: var(--s3); }
+.prep-truck--sale { flex-direction: row; align-items: center; gap: var(--s3); background: var(--lemon-pale); }
+.prep-truck-top { display: flex; align-items: center; gap: var(--s3); }
+.prep-truck-ico { flex: 0 0 auto; display: grid; place-items: center; width: 52px; height: 52px; background: var(--lemon); border: var(--line) solid var(--ink); border-radius: 14px; box-shadow: 0 3px 0 var(--ink); transform: rotate(-4deg); }
+.prep-truck-ico .ico { width: 38px; height: 38px; }
+.prep-truck-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+.prep-truck-title { font-size: var(--fs-md); font-weight: 900; line-height: 1.2; }
+.prep-truck-line { margin: 0; font-size: var(--fs-sm); color: var(--ink-soft); line-height: 1.3; }
+.prep-truck-line.is-bad { color: var(--bad); font-weight: 700; }
+.prep-truck-wx { min-height: 24px; padding: 1px 9px; font-size: var(--fs-xs); }
+.prep-truck-wx .ico { width: 18px; height: 18px; }
+.prep-truck-btn { flex: 0 0 auto; }
+.prep-truck-btn .ico { width: 20px; height: 20px; }
+.prep-truck-ctl { padding-top: var(--s2); border-top: 2px dashed var(--ink-faint); }
+
+/* results: the truck's lines inside the tally */
+.res-row.res-row--sub dd, .res-row.res-row--sub dt { font-weight: 900; }
+.res-row.res-row--truck { margin-top: 4px; padding-top: 10px; border-top: 2px solid var(--ink); }
+.res-row--truck dt { font-family: var(--font-display); font-weight: 400; }
+.res-row--truck dt span { min-width: 0; line-height: 1.15; }   /* wraps on phones: town names like Dustwater Springs are long */
+.res-truck-chip { min-height: 26px; padding: 1px 9px; font-size: var(--fs-xs); background: #c9f5dc; }
+.res-truck-chip .ico { width: 18px; height: 18px; }
+.res-truck-chip--travelling { background: #cdeeff; }
+.res-truck-chip--arrived { background: var(--lemon); }
+.res-truck-chip--parked { background: #e6e8f4; }
+.res-row.res-row--note { padding: 2px 0 6px; border-top: 0; }
+.res-row--note dt { font-size: var(--fs-sm); font-weight: 700; color: var(--ink-soft); }
+
+@media (prefers-reduced-motion: reduce) {
+  .camp-plan, .camp-marker-in, .camp-stamp.is-on .camp-stamp-ring { animation: none; }
+  .camp-marker { transition: none; }
+}
+#game.reduced .camp-plan, #game.reduced .camp-marker-in, #game.reduced .camp-stamp.is-on .camp-stamp-ring { animation: none; }
+#game.reduced .camp-marker { transition: none; }
+
+/* ====================================================================== *
+ * Customise (js/screens.js buildCustom): live preview, try-on bar, swatches and cards
+ * ====================================================================== */
+.cus { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s3); }   /* minmax: a long try-on bar must not widen the window on phones */
+.cus-side { min-width: 0; position: sticky; top: calc(-1 * var(--s4)); z-index: 5; display: flex; flex-direction: column; gap: var(--s2); margin: calc(-1 * var(--s4)) calc(-1 * var(--s4)) 0; padding: var(--s3) var(--s4) var(--s2); background: var(--paper); border-bottom: 2px solid var(--ink-faint); }
+.cus-tabs { justify-content: stretch; }
+.cus-tab { flex: 1 1 0; }
+.cus-tab.is-locked:not(.is-on) { color: var(--ink-soft); background: var(--paper-2); }
+.cus-stage { position: relative; flex: 0 0 auto; height: clamp(120px, 22vh, 200px); overflow: hidden; background: linear-gradient(180deg, #bfe9ff 0%, #e4f6ff 60%, #e9dcc4 60%, #d9c7a6 100%); border: var(--line) solid var(--ink); border-radius: var(--r-md); box-shadow: var(--drop); }
+.cus-canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+.cus-stage.is-truckless::after { content: ''; position: absolute; inset: 0; background: rgba(241, 244, 255, .35); }
+.cus-stage-pop { animation: ss-bump .45s var(--spring); }
+.cus-bonus { position: absolute; right: 8px; top: 8px; z-index: 1; min-height: 26px; padding: 2px 9px; font-size: var(--fs-xs); box-shadow: 0 2px 0 var(--ink); }
+.cus-bonus .ico { width: 1.4em; height: 1.4em; vertical-align: 0; }
+.cus-bonus-note { color: var(--leaf-deep); }
+.cus-try { display: flex; align-items: center; gap: var(--s2); min-width: 0; padding: 6px 6px 6px 8px; background: var(--lemon-pale); border: var(--line) solid var(--ink); border-radius: var(--r-md); box-shadow: 0 3px 0 var(--ink); }
+.cus-try.is-locked { background: var(--paper-2); }
+.cus-try-in { animation: ss-rise .25s var(--swift); }
+.cus-try-art .cus-art { width: 34px; height: 34px; }
+.cus-try-text { flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; line-height: 1.2; }
+.cus-try-name { font-weight: 900; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cus-try-note { font-size: var(--fs-xs); font-weight: 700; color: var(--ink-soft); }
+.cus-buy { flex: 0 0 auto; white-space: nowrap; }
+.cus-say { display: flex; align-items: center; gap: 8px; min-height: 34px; margin: 0; font-size: var(--fs-sm); font-weight: 700; line-height: 1.25; color: var(--ink-soft); }
+.cus-say .sq { width: 34px; height: 34px; }
+.cus-say.is-bad { color: var(--bad); }
+.cus-say-pop .cus-say-text { animation: ss-rise .25s var(--swift); }
+.cus-main { display: flex; flex-direction: column; gap: var(--s4); min-width: 0; }
+.cus-list { display: flex; flex-direction: column; gap: var(--s5); }
+.cus-main > .shop-cash { padding: 6px 12px; background: var(--lemon-pale); border: var(--line) solid var(--ink); border-radius: var(--r-md); }
+.cus-sec-title { display: flex; align-items: center; gap: 6px; margin: 0 0 8px; font-size: var(--fs-md); font-weight: 900; }
+.cus-sec-title .ico { width: 26px; height: 26px; }
+.cus-decor-n { margin-left: auto; min-height: 24px; font-size: var(--fs-xs); }
+.cus-hint { margin: -2px 0 8px; font-size: var(--fs-xs); font-weight: 700; color: var(--ink-soft); }
+.cus-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 10px 8px; }
+.cus-grid--sw { grid-template-columns: repeat(auto-fill, minmax(58px, 1fr)); }
+.cus-opt { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 4px; min-height: 64px; padding: 7px 4px 5px; font: inherit; color: var(--ink); background: var(--paper); border: var(--line) solid var(--ink); border-radius: var(--r-md); box-shadow: 0 3px 0 var(--ink); cursor: pointer; transition: transform .09s var(--swift), box-shadow .09s var(--swift), background-color .15s; }
+.cus-opt:active { transform: translateY(3px); box-shadow: 0 0 0 var(--ink); }
+.cus-opt:focus-visible { outline: 3px solid var(--grape); outline-offset: 3px; }
+.cus-opt.is-on { background: var(--lemon); }
+.cus-opt.is-trial { background: #efe9ff; outline: 3px dashed var(--grape); outline-offset: 2px; }
+.cus-opt.is-locked .cus-art { opacity: .45; filter: grayscale(.7); }
+.cus-opt.is-dear .cus-price { color: var(--bad); }
+.cus-art { display: grid; place-items: center; width: 40px; height: 40px; line-height: 0; }
+.cus-art > .ico, .cus-art > svg { width: 100%; height: 100%; }
+.cus-art.is-flip { transform: scaleX(-1); }
+.cus-opt--card .cus-art { width: 44px; height: 44px; }
+.cus-opt--card .cus-art > .sq { width: 44px; height: 44px; animation: none; }
+.cus-opt-name { font-size: var(--fs-sm); font-weight: 800; line-height: 1.15; text-align: center; }
+.cus-price { display: inline-flex; align-items: center; gap: 3px; min-height: 16px; font-size: var(--fs-xs); font-weight: 900; }
+.cus-price .ico { width: 15px; height: 15px; vertical-align: 0; }
+.cus-opt-ap { position: absolute; top: -9px; right: -7px; padding: 0 5px; font-size: 0.625rem; font-weight: 900; line-height: 16px; color: #06311a; background: #b9f2d1; border: 2px solid var(--ink); border-radius: 999px; }
+/* swatches: a colour (or stripes) in a sticker disc, with the pattern on top */
+.cus-sw { border: var(--line) solid var(--ink); border-radius: 50%; overflow: hidden; background-color: var(--c, #ffffff); box-shadow: inset -4px -5px 0 rgba(27, 31, 59, .15), inset 4px 4px 0 rgba(255, 255, 255, .35); }
+.cus-sw > .sq { width: 86%; height: 86%; animation: none; }
+.cus-sw--classic { background: conic-gradient(#ff6257 0 25%, #ffffff 0 50%, #ffd83d 0 75%, #c98b55 0); }
+.cus-pat--stripes, .cus-pat--candy { background-image: repeating-linear-gradient(135deg, rgba(255, 255, 255, .9) 0 5px, transparent 5px 10px); }
+.cus-pat--wood { background-image: repeating-linear-gradient(0deg, rgba(122, 74, 18, .35) 0 2px, transparent 2px 7px); }
+.cus-pat--slices { background-image: radial-gradient(circle at 32% 34%, #fff6b0 0 4px, #f2ae00 4px 6px, transparent 6.5px), radial-gradient(circle at 70% 70%, #fff6b0 0 4px, #f2ae00 4px 6px, transparent 6.5px); }
+.cus-pat--dots { background-image: radial-gradient(circle, #ffffff 0 3px, transparent 3.5px); background-size: 12px 12px; }
+.cus-pat--checker { background-image: conic-gradient(rgba(27, 31, 59, .8) 0 25%, transparent 0 50%, rgba(27, 31, 59, .8) 0 75%, transparent 0); background-size: 14px 14px; }
+/* the name on the sign */
+.cus-name-row { display: flex; align-items: center; gap: 8px; }
+.cus-name-in { flex: 1 1 auto; min-width: 0; height: 52px; padding: 0 14px; font-size: var(--fs-xl); letter-spacing: .04em; text-transform: uppercase; background: var(--paper); border: var(--line) solid var(--ink); border-radius: var(--r-md); -webkit-user-select: text; user-select: text; }
+.cus-name-in:focus { outline: 3px solid var(--grape); outline-offset: 2px; }
+.cus-name-in[aria-invalid="true"] { background: #fff3f1; border-color: var(--coral-deep); }
+.cus-name-n { font-size: var(--fs-sm); font-weight: 900; color: var(--ink-soft); }
+.cus-name-msg { display: block; margin-top: 5px; font-size: var(--fs-xs); font-weight: 800; color: var(--good); }
+.cus-name-msg.is-bad { color: var(--bad); }
+.cus-teaser { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: var(--s5) var(--s4); text-align: center; }
+.cus-teaser .sq { width: 72px; height: 72px; }
+.cus-teaser-title { margin: 0; font-size: var(--fs-xl); }
+.cus-teaser p { margin: 0; max-width: 36ch; }
+/* room beside the preview (desktop, tablets, phones on their side): two columns, the preview stays put */
+@media (min-width: 700px) {
+  .cus { grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); align-items: start; gap: var(--s4); }
+  .cus-side { top: 0; margin: 0; padding: 0; background: none; border: 0; }
+  .cus-stage { height: 240px; }
+}
+@media (min-width: 700px) and (max-height: 480px) {
+  .cus-side { gap: 6px; }
+  .cus-stage { height: 130px; }
+  .cus-say { min-height: 0; font-size: var(--fs-xs); }
+  .cus-say .sq { width: 26px; height: 26px; }
+}
+@media (max-width: 699px) {
+  .cus-say { min-height: 0; font-size: var(--fs-xs); }
+  .cus-say .sq { width: 28px; height: 28px; }
+}
+
+/* Squeezy's reaction on the results card */
+.res-sq { display: flex; align-items: center; gap: 8px; max-width: 100%; margin-top: 8px; padding: 4px 14px 4px 4px; text-align: left; background: var(--paper); border: 2px solid var(--ink); border-radius: 999px; animation: ss-pop-in .4s var(--spring) .9s backwards; }
+.res-sq .sq { width: 42px; height: 42px; }
+.res-sq-line { margin: 0; font-size: var(--fs-sm); font-weight: 700; line-height: 1.25; }
+.res-sq-line b { font-weight: 900; }
+
+/* the Style button makes the prep footer one button busier: wider row on desktop, and on phones the Open label may wrap */
+@container prep-foot (min-width: 640px) {
+  .prep-foot-in .prep-foot-row { flex-basis: 500px; }
+  .prep-foot.has-deals .prep-foot-row { flex-basis: 560px; }
+}
+@container prep-foot (max-width: 420px) {
+  .prep-nav { min-width: 50px; padding-left: 4px; padding-right: 4px; }
+  .prep-foot.has-deals .prep-go { white-space: normal; line-height: 1.05; }
+}

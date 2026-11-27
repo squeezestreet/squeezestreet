@@ -4,7 +4,7 @@
  * Only two hashes of the password are kept here, never the password itself. Unlocked for the browser tab
  * (sessionStorage), so a reload keeps it; "Lock admin" turns it off.
  * shortcut: a client-side check, fine for a testing tool; anyone who edits the page source can bypass it.
- * tools/package-crazygames.js leaves this file out of the CrazyGames upload.
+ * tools/package-crazygames.js leaves this file out of the CrazyGames upload; the single-file build keeps it for testing.
  */
 (function () {
   'use strict';

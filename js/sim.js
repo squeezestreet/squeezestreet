@@ -54,7 +54,14 @@
     dexChance: 0.38,      // chance Dex rolls into town on a day from day 3 (day 2 he always comes): about 45% of days with dexGap
     dexGap: 3,            // never more than this many days in a row without him
     limitedChance: 0.45,  // chance one of his visits (from day 3) carries a limited flavor: about half of them with limitedGap
-    limitedGap: 3         // never more than this many visits in a row without one
+    limitedGap: 3,        // never more than this many visits in a row without one
+    // food truck (the rest lives in DATA.truck / DATA.cities)
+    truckNoise: 0.15,     // a trading day's crowd swings this much either way
+    truckCrowd: 2.3,      // share of a city's passers-by who would stop, before weather, price and taste
+    truckWtp: 1.8,        // what a cup is worth from the truck in a normal town (cities scale it by tolerance)
+    appealWtp: 0.5,       // a stand that looks the part: people pay this share of its appeal more (works on busy days too, when the street is full)
+    truckFatFloor: 0.55,  // staying put never thins the crowd below this share
+    truckFlavor: 0.3      // share of a flavor's price premium and pull the truck gets (strangers on the road pay less for a fancy flavor)
   };
   var OUTCOMES = ['new', 'streak', 'broken', 'saved', 'lost', 'closed', 'away'];
   var BREAKS = ['taste', 'pricey', 'slow', 'wait', 'soldout', 'quit'];
@@ -177,7 +184,8 @@
       stats: { days: 0, bestProfit: 0, bestCups: 0, tips: 0, served: 0, bestStreak: 0 },
       history: [], today: null, lastResult: null,
       settings: cleanSettings(settings), tutorial: { done: false }, won: false,
-      regulars: [], nextRegular: 1, boosts: [], boostCost: 0, dealer: null
+      regulars: [], nextRegular: 1, boosts: [], boostCost: 0, dealer: null,
+      truck: null, custom: D.customDefaults(), groceriesLast: 0
     };
   }
 
@@ -249,6 +257,7 @@
       hourly: hourly, spoiled: { lemons: Math.max(0, fin(sp.lemons, 0)), ice: Math.max(0, fin(sp.ice, 0)) },
       milestones: (Array.isArray(raw.milestones) ? raw.milestones : []).filter(function (id) { return !!D.byId(D.milestones, id); }),
       bestDay: !!raw.bestDay, cashAfter: fin(raw.cashAfter, 0),
+      standProfit: fin(raw.standProfit, fin(raw.profit, 0)), truck: cleanTruckDay(raw.truck), groceries: cleanBags(raw.groceries),
       loyalty: Math.max(0, fin(raw.loyalty, 0)), boostCost: Math.max(0, fin(raw.boostCost, 0)),
       boosts: (Array.isArray(raw.boosts) ? raw.boosts : []).filter(function (id, i, a) { return !!boostDef(id) && a.indexOf(id) === i; }),
       regulars: (Array.isArray(raw.regulars) ? raw.regulars : []).filter(function (r) {
@@ -286,6 +295,80 @@
       offers.push({ id: o.id, kind: o.kind, sold: !!o.sold });
     });
     return { day: Math.max(1, Math.floor(fin(raw.day, 1))), offers: offers };
+  }
+
+  /* Food truck, customisation and Mom's bags, as saved. */
+  var TRUCK_STATUS = ['trading', 'travelling', 'arrived', 'parked'];
+  function cityDef(id) { return D.byId(D.cities, id); }
+  function freshTruck() {
+    return { at: 'home', route: null, open: true, price: D.truck.priceStart, daysAt: 0, visited: ['home'], total: { days: 0, cups: 0, revenue: 0, costs: 0, profit: 0 } };
+  }
+  function cleanTruck(raw) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    var T = freshTruck(), rr = raw.route, tot = raw.total && typeof raw.total === 'object' ? raw.total : {};
+    if (cityDef(raw.at)) T.at = raw.at;
+    if (rr && typeof rr === 'object' && rr.from === T.at && cityDef(rr.to) && rr.to !== T.at) {
+      var total = clamp(Math.floor(fin(rr.total, 1)), 1, 30);
+      T.route = { from: T.at, to: rr.to, left: clamp(Math.floor(fin(rr.left, total)), 1, total), total: total, fuel: r2(Math.max(0, fin(rr.fuel, 0))) };
+    }
+    if (typeof raw.open === 'boolean') T.open = raw.open;
+    T.price = r2(clamp(r05(fin(raw.price, D.truck.priceStart)), D.price.min, D.price.max));
+    T.daysAt = cnt(raw.daysAt, 9999);
+    addIds(T.visited, raw.visited, D.cities);
+    if (T.visited.indexOf(T.at) < 0) T.visited.push(T.at);
+    T.total = { days: cnt(tot.days, 1e9), cups: cnt(tot.cups, 1e9), revenue: r2(Math.max(0, fin(tot.revenue, 0))),
+      costs: r2(Math.max(0, fin(tot.costs, 0))), profit: r2(fin(tot.profit, 0)) };
+    return T;
+  }
+  function cleanTruckDay(raw) {
+    if (!raw || typeof raw !== 'object' || !cityDef(raw.city)) return null;
+    var o = { city: raw.city, status: TRUCK_STATUS.indexOf(raw.status) >= 0 ? raw.status : 'parked', cups: cnt(raw.cups, 1e6),
+      weather: cleanWx(raw.weather) || { type: 'sunny', temp: 26 } };
+    ['revenue', 'supplies', 'rent', 'fuel'].forEach(function (k) { o[k] = r2(Math.max(0, fin(raw[k], 0))); });
+    o.profit = r2(fin(raw.profit, o.revenue - o.supplies - o.rent - o.fuel));
+    return o;
+  }
+  function cleanBags(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    var o = {};
+    ITEMS.forEach(function (it) { o[it] = cnt(raw[it], 1e6); });
+    return o;
+  }
+
+  function cdef(target, slot, id) {
+    var t = D.custom[target], list = t && t[slot];
+    return Array.isArray(list) ? D.byId(list, id) : null;
+  }
+  function ckey(target, slot, id) { return target + '.' + slot + '.' + id; }
+  function hasLook(custom, target, slot, id) {
+    var d = cdef(target, slot, id);
+    return !!d && (!(d.cost > 0) || (!!custom && Array.isArray(custom.owned) && custom.owned.indexOf(ckey(target, slot, id)) >= 0));
+  }
+  function cleanName(target, v) {
+    var max = (D.custom.nameMax && D.custom.nameMax[target]) || 14;
+    var s = typeof v === 'string' ? v.toUpperCase().replace(/[^A-Z0-9 &'!.\-]/g, '').replace(/\s+/g, ' ').trim().slice(0, max).trim() : '';
+    return s || D.customDefaults()[target].name;
+  }
+  /** Saved looks: only known, owned options are kept; anything else falls back to the default. */
+  function cleanCustom(raw) {
+    var out = D.customDefaults();
+    if (!raw || typeof raw !== 'object') return out;
+    (Array.isArray(raw.owned) ? raw.owned : []).forEach(function (k) {
+      var p = typeof k === 'string' ? k.split('.') : [], d = p.length === 3 ? cdef(p[0], p[1], p[2]) : null;
+      if (d && d.cost > 0 && out.owned.indexOf(k) < 0) out.owned.push(k);
+    });
+    ['stand', 'truck'].forEach(function (target) {
+      var r = raw[target] && typeof raw[target] === 'object' ? raw[target] : {}, o = out[target];
+      D.customSlots[target].forEach(function (slot) {
+        if (slot === 'name') o.name = cleanName(target, r.name);
+        else if (slot === 'decor') {
+          (Array.isArray(r.decor) ? r.decor : []).forEach(function (id) {
+            if (o.decor.length < 4 && o.decor.indexOf(id) < 0 && hasLook(out, target, slot, id)) o.decor.push(id);
+          });
+        } else if (hasLook(out, target, slot, r[slot])) o[slot] = r[slot];
+      });
+    });
+    return out;
   }
 
   /** Append the known, not-yet-present ids from a saved list, keeping the saved order. */
@@ -345,6 +428,9 @@
     addIds(st.boosts, raw.boosts, D.boosts);
     st.boostCost = st.boosts.length ? r2(Math.max(0, fin(raw.boostCost, 0))) : 0;
     st.dealer = cleanDealer(raw.dealer);
+    st.truck = cleanTruck(raw.truck);
+    st.custom = cleanCustom(raw.custom);
+    st.groceriesLast = clamp(Math.floor(fin(raw.groceriesLast, 0)), 0, st.day);
     return st;
   }
 
@@ -433,11 +519,13 @@
     if (st.market) ITEMS.forEach(function (it) { if (per[it] > 0 && st.stock[it] < per[it] * TUNE.loanCups) need += st.market[it]; });
     return need;
   }
+  /** Fuel paid for a trip that has not left yet: it comes back if the plan is cancelled. */
+  function fuelBack(st) { var R = st.truck && st.truck.route; return R && R.left >= R.total ? fin(R.fuel, 0) : 0; }
   function grandma(st) {
     if (st.phase !== 'prep' || !st.market) return;
-    var need = loanNeed(st);
-    if (need <= 0 || st.cash >= need) return;
-    var loan = Math.ceil(need - st.cash) + 2;
+    var need = loanNeed(st), have = st.cash + fuelBack(st);       // planned fuel still counts as yours, so cancelling a trip is no gift
+    if (need <= 0 || have >= need) return;
+    var loan = Math.ceil(need - have) + 2;
     st.cash = r2(st.cash + loan);
     toast('Grandma slipped you ' + money(loan) + ' to keep the stand going.', 'good', 'heart');
     emit('cash', { amount: st.cash, delta: loan, reason: 'loan' });
@@ -529,7 +617,8 @@
     var can = cupsFrom(st, stockAfter(st));
     if (can.cups < 1) {
       var name = D.items[can.limiting].name.toLowerCase();
-      return { ok: false, reason: 'You do not have enough ' + name + ' for a single cup. Add a pack of ' + name + ' to your cart.' };
+      return { ok: false, reason: 'You do not have enough ' + name + ' for a single cup. Add a pack of ' + name + ' to your cart.' +
+        (fuelBack(st) > 0 ? ' Cancelling the truck\'s trip gives its fuel back.' : '') };
     }
     return { ok: true, reason: '' };
   }
@@ -537,11 +626,17 @@
   function prepInfo() {
     var st = SS.state;
     if (!st || !st.market) return { cost: 0, cashAfter: 0, rent: 0, stockAfter: zeros(), maxCups: 0, limiting: 'lemons', costPerCup: 0, canStart: false, reason: 'Start a game first.' };
-    var cost = cartCost(), after = stockAfter(st), can = cupsFrom(st, after), per = perCup(st), cpc = flavorDef(st.flavor).extraCost / 10;
+    var cost = cartCost(), after = stockAfter(st), can = cupsFrom(st, after);
+    var ok = canStartDay(), T = st.truck, c = T && !T.route && T.open ? cityDef(T.at) : null, truckRent = c && c.traffic > 0 ? c.rent : 0;
+    var left = r2(st.cash - cost - rent()), truckShut = truckRent > 0 && left + 1e-9 < truckRent;   // truckStart pays it after the cart and the stand's rent
+    return { cost: cost, cashAfter: truckShut ? left : r2(left - truckRent), rent: rent(), stockAfter: after, maxCups: can.cups, limiting: can.limiting,
+      costPerCup: r2(cupCost(st)), canStart: ok.ok, reason: ok.reason, truckRent: truckRent, truckShut: truckShut, truckCity: c ? c.name : '' };
+  }
+  /** What one cup costs at today's market prices with the current recipe and flavor. */
+  function cupCost(st) {
+    var per = perCup(st), cpc = flavorDef(st.flavor).extraCost / 10;
     ITEMS.forEach(function (it) { cpc += per[it] * st.market[it] / D.items[it].pack; });
-    var ok = canStartDay();
-    return { cost: cost, cashAfter: r2(st.cash - cost - rent()), rent: rent(), stockAfter: after, maxCups: can.cups, limiting: can.limiting,
-      costPerCup: r2(cpc), canStart: ok.ok, reason: ok.reason };
+    return cpc;
   }
 
   function setRecipe(key, value) {
@@ -602,7 +697,7 @@
       bell: { cd: 0, max: TUNE.bellCd, active: 0 },
       soldOut: null, weatherNow: { type: st.weather.type, temp: st.weather.temp },
       missed: { pricey: 0, wait: 0, soldout: 0, quit: 0 },
-      hourly: [0, 0, 0, 0, 0, 0, 0, 0, 0], loyalty: 0
+      hourly: [0, 0, 0, 0, 0, 0, 0, 0, 0], loyalty: 0, groceries: rollGroceries(st)
     };
     var rng = dayRng(st.seed, st.day, 777), ev = eventMods(st.event ? st.event.id : null);
     var mix = [], total = 0, k;
@@ -617,7 +712,7 @@
       passed: 0, served: 0, soldOutAt: null, approaching: 0, patMul: 1,
       surprise: m.event && !m.event.known ? { ev: m.event, at: 0.38 + 0.25 * rng(), done: false, until: 0 } : null,
       vipAt: ev.critic ? 0.3 + 0.3 * rng() : -1, vipSeen: false, vipServed: false,
-      sched: [], regRows: [], newRegs: 0, shieldUsed: false
+      sched: [], regRows: [], newRegs: 0, shieldUsed: false, truck: null, bagsWarned: null
     };
     // which regulars come by today, and when: fixed by (seed, day, regular)
     var wxId = st.weather.type, come = boostOn('hype') ? 1 : wxId === 'storm' ? TUNE.visitStorm : wxId === 'rainy' ? TUNE.visitWet : TUNE.visit;
@@ -629,6 +724,7 @@
     if (cost + rentPaid > 0) emit('cash', { amount: st.cash, delta: -r2(cost + rentPaid), reason: 'supplies' });
     emit('phase', { from: 'prep', to: 'day' });
     emit('day:start', { day: st.day, weather: st.weather, event: st.event });
+    rt.truck = truckStart(st);
     st.boosts.forEach(function (id) { emit('boost:on', { id: id }); });
     // a few people are already out and about, so the street is not empty at opening time
     var n = Math.min(14, Math.round(spawnRate(st, st.today) * 7));
@@ -648,8 +744,9 @@
   }
   function spawnRate(st, td) {
     var wxId = td.weatherNow.type, wx = D.weather[wxId] || D.weather.sunny, lw = LOC_WX[rt.loc.id];
+    // the look draws people over from the next street: outside the interest roll, whose 95% cap a good stand reaches by mid-game
     return TUNE.rate * rt.loc.traffic * wx.traffic * (lw && lw[wxId] || 1) * rt.ev.traffic * curve(td.t, rt.loc.id) * (0.85 + 0.06 * st.reputation) *
-      (boostOn('flyers') ? TUNE.flyers : 1);
+      (boostOn('flyers') ? TUNE.flyers : 1) * (1 + customAppeal('stand'));
   }
   function pickKind() {
     var at = rt.rng() * rt.mixTotal, i;
@@ -716,7 +813,7 @@
     if (td.soldOut) { balk(c, 'soldout'); return; }
     var wxWtp = wx.thirst >= 1 ? 1 + 0.4 * (wx.thirst - 1) : 1 - 0.3 * (1 - wx.thirst);
     c._wtp = TUNE.wtp * rt.loc.wtp * k.wtp * wxWtp * (1 + fl.wtp) * (0.85 + 0.075 * st.reputation) * rt.ev.wtp * (0.62 + 0.45 * (rng() + rng())) *
-      (boostOn('golden') ? TUNE.golden : 1);
+      (boostOn('golden') ? TUNE.golden : 1) * (1 + TUNE.appealWtp * customAppeal('stand'));
     if (st.price > c._wtp) { balk(c, 'pricey'); return; }
     if (!roomFor(c)) { c._hover = true; return; }          // long line: they eye it as they walk up
     c.state = 'approach'; c.stateT = 0; c.mood = 0.2;
@@ -1018,6 +1115,14 @@
         emit('weather:change', { type: td.weatherNow.type, temp: td.weatherNow.temp });
       }
     }
+    var bags = td.groceries;
+    if (bags && !bags.done && !rt.closing) {
+      if (rt.bagsWarned !== bags && td.clock >= bags.at - bags.eta) {
+        rt.bagsWarned = bags;
+        emit('groceries:incoming', { eta: Math.max(0, r2(bags.at - td.clock)) });
+      }
+      if (td.clock >= bags.at) deliverGroceries(st, td, bags);
+    }
     var wxId = td.weatherNow.type, temp = td.weatherNow.temp;
     if (st.stock.ice > 0 && !boostOn('frost')) {
       var melt = clamp(TUNE.meltBase + (temp - 22) * 0.012, 0.06, 0.45) * (1 - clamp(upVal('cooler'), 0, 1));
@@ -1309,7 +1414,10 @@
     var m = td.missed, considered = rt.served + m.pricey + m.wait + m.soldout + m.quit;
     var revenue = r2(td.revenue), tips = r2(td.tipsEarned), cost = r2(rt.cost + rt.flavorCost);
     var loyalty = r2(td.loyalty), boostCost = r2(st.boostCost || 0);
-    var profit = r2(revenue + tips + loyalty - cost - rt.rent - boostCost);
+    var standProfit = r2(revenue + tips + loyalty - cost - rt.rent - boostCost);
+    var truckRes = truckEnd(st);
+    var profit = r2(standProfit + (truckRes ? truckRes.profit : 0));
+    var bags = td.groceries && td.groceries.done ? cleanBags(td.groceries.items) : null;
     // regulars still on their way in or in line at closing came by (streak kept);
     // those who stayed away are listed when they had a streak worth noticing
     st.regulars.forEach(function (g) {
@@ -1328,7 +1436,8 @@
       repBefore: rt.repBefore, repAfter: st.reputation,
       reviews: pickReviews(top), topFeedback: top, advice: '',
       hourly: td.hourly.slice(), spoiled: spoilage(st), milestones: [],
-      bestDay: st.stats.days > 0 && profit > 0 && profit > st.stats.bestProfit, cashAfter: 0,
+      bestDay: st.stats.days > 0 && standProfit > 0 && standProfit > st.stats.bestProfit, cashAfter: 0,
+      standProfit: standProfit, truck: truckRes, groceries: bags,
       loyalty: loyalty, boostCost: boostCost, boosts: st.boosts.slice(), regulars: rt.regRows
     };
     res.advice = adviceFor(top, st, td, res);
@@ -1336,7 +1445,7 @@
     st.boostCost = 0;
 
     st.stats.days++;
-    st.stats.bestProfit = Math.max(st.stats.bestProfit, profit);
+    st.stats.bestProfit = Math.max(st.stats.bestProfit, standProfit);       // "one day" goals stay about the stand
     st.stats.bestCups = Math.max(st.stats.bestCups, td.sold);
     st.stats.tips = r2(st.stats.tips + tips);
     st.stats.served += rt.served;
@@ -1352,6 +1461,10 @@
     st.phase = 'results';
     emit('day:end', { result: res });
     emit('phase', { from: 'day', to: 'results' });
+    if (truckRes) {
+      if (truckRes.status === 'arrived') emit('truck:arrive', { city: truckRes.city });
+      emit('truck:day', { result: truckRes });
+    }
     announceMilestones(done);        // after the phase change, so banners land on the results screen
     persist(true);
   }
@@ -1635,6 +1748,283 @@
   }
 
   /* ------------------------------------------------------------------ *
+   * Food truck and the nationwide campaign. The truck's day is not simulated
+   * customer by customer: it is resolved in one go when the stand's day ends.
+   * ------------------------------------------------------------------ */
+  var CLIMATE = {
+    mild: WX_WEIGHT,
+    hot: { storm: 3, rainy: 6, cloudy: 14, sunny: 45, heatwave: 32 },
+    cool: { storm: 6, rainy: 20, cloudy: 32, sunny: 36, heatwave: 6 }
+  };
+  var CLIMATE_T = { mild: 0, hot: 3, cool: -4 };
+  function cityIdx(id) { for (var i = 0; i < D.cities.length; i++) if (D.cities[i].id === id) return i; return 0; }
+  /** Fuel and travel days between two map points (0 / 0 for staying put). */
+  function trip(from, to) {
+    var A = cityDef(from), B = cityDef(to);
+    if (!A || !B || from === to) return { fuel: 0, days: 0 };
+    var d = Math.sqrt(sq(A.x - B.x) + sq(A.y - B.y));
+    return { fuel: r2(d * D.truck.fuelPerMap), days: Math.max(1, Math.ceil(d / D.truck.mapPerDay - 1e-9)) };
+  }
+  function cityWeather(id, day) {
+    var st = SS.state, c = cityDef(id), seed = st ? st.seed : 1;
+    day = Math.max(1, Math.floor(fin(Number(day), st ? st.day : 1)));
+    if (!c || id === 'home') { var ht = actualType(seed, day); return { type: ht, temp: tempIn(ht, 0.5) }; }
+    var r = dayRng(seed, day, 500 + cityIdx(id)), w = CLIMATE[c.climate] || WX_WEIGHT, total = 0, acc = 0, u = r(), type = 'sunny', i;
+    for (i = 0; i < WX_ORDER.length; i++) total += w[WX_ORDER[i]];
+    for (i = 0; i < WX_ORDER.length; i++) { acc += w[WX_ORDER[i]] / total; if (u < acc) { type = WX_ORDER[i]; break; } }
+    return { type: type, temp: tempIn(type, r()) + (CLIMATE_T[c.climate] || 0) };
+  }
+  /** What the campaign map and the estimate go by: like the stand's forecast it is off by one weather step now and then,
+   *  more often further ahead. Today once the stand is open, and any day already gone, it is the real weather. */
+  function cityForecast(id, day) {
+    var st = SS.state, now = st ? st.day : 1, w = cityWeather(id, day), c = cityDef(id);
+    day = Math.max(1, Math.floor(fin(Number(day), now)));
+    var ahead = day - now;
+    if (!c || ahead < 0 || (ahead === 0 && st && st.phase !== 'prep')) return { type: w.type, temp: w.temp, confidence: 1 };
+    var r = dayRng(st ? st.seed : 1, day, 900 + cityIdx(id)), conf = Math.max(0.3, 0.5 + 0.45 * Math.sqrt(r()) - 0.1 * ahead);
+    var miss = r(), side = r(), tempRoll = r(), f = { type: w.type, temp: w.temp, confidence: Math.round(conf * 20) / 20 };
+    if (miss > conf) {                                    // the same roll each time you look, so a forecast only firms up as the day nears
+      var idx = WX_ORDER.indexOf(w.type), to = idx + (side < 0.5 ? -1 : 1);
+      if (to < 0 || to >= WX_ORDER.length) to = idx + (to < 0 ? 1 : -1);
+      f.type = WX_ORDER[to];
+      f.temp = tempIn(f.type, tempRoll) + (CLIMATE_T[c.climate] || 0);
+    } else f.temp = w.temp + Math.round((tempRoll - 0.5) * 4);
+    return f;
+  }
+  /** Share of people whose limit is at least price / normal: the same spread the stand's customers have. */
+  function accept(ratio) {
+    var s = (ratio - 0.62) / 0.45;
+    return s <= 0 ? 1 : s <= 1 ? 1 - s * s / 2 : s < 2 ? sq(2 - s) / 2 : 0;
+  }
+  /** A trading day at city `id` on `day`, before noise (u = 0.5 is the middle). */
+  function truckSales(st, id, day, daysAt, u, wxo) {
+    var c = cityDef(id); wxo = wxo || cityWeather(id, day);
+    var wx = D.weather[wxo.type] || D.weather.sunny, fl = flavorDef(st.flavor);
+    var price = st.truck ? st.truck.price : D.truck.priceStart, rep = st.reputation, flw = fl.wtp * TUNE.truckFlavor;
+    var wxWtp = wx.thirst >= 1 ? 1 + 0.4 * (wx.thirst - 1) : 1 - 0.3 * (1 - wx.thirst);
+    var normal = TUNE.truckWtp * c.tolerance * (1 + flw) * (0.85 + 0.075 * rep) * wxWtp;
+    var quality = lerp(0.3, 1, taste(0, wxo.temp).score);
+    var fade = Math.max(TUNE.truckFatFloor, 1 - D.truck.fatigue * daysAt);
+    var base = c.traffic * TUNE.interest * TUNE.truckCrowd * c.demand * wx.traffic * (0.35 + 0.65 * wx.thirst) * accept(price / normal) * quality *
+      (0.75 + 0.1 * rep) * (1 + 0.4 * flw) * (1 + customAppeal('truck')) * fade;
+    var cups = Math.min(D.truck.capacity, Math.max(0, Math.round(base * lerp(1 - TUNE.truckNoise, 1 + TUNE.truckNoise, u))));
+    var per = st.market ? cupCost(st) * c.supply : 0;
+    return { cups: cups, revenue: r2(cups * price), supplies: r2(cups * per), weather: wxo, price: price, per: per };
+  }
+  function truckUnlocked() {
+    var st = SS.state;
+    return !!st && (!!st.truck || st.unlockedLocations.indexOf(D.truck.unlockLocation) >= 0 || st.lifetimeEarnings + 1e-9 >= D.truck.unlockLifetime);
+  }
+  function buyTruck() {
+    var st = SS.state;
+    if (!st) return { ok: false, reason: 'Start a game first.' };
+    if (st.truck) return { ok: false, reason: 'You already own the food truck.' };
+    if (!shopOpen(st)) return { ok: false, reason: SHOP_CLOSED };
+    if (!truckUnlocked()) return { ok: false, reason: 'The food truck goes on sale once you open at ' + locDef(D.truck.unlockLocation).name + ' or sell ' + money(D.truck.unlockLifetime) + ' in total.' };
+    if (st.cash + 1e-9 < D.truck.cost) return { ok: false, reason: 'You need ' + money(D.truck.cost - st.cash) + ' more for the food truck.' };
+    st.cash = r2(st.cash - D.truck.cost);
+    st.truck = freshTruck();
+    emit('truck:buy', {});
+    emit('cash', { amount: st.cash, delta: -D.truck.cost, reason: 'truck' });
+    afterPrepSpend(st);
+    persist(true);
+    return { ok: true, reason: '' };
+  }
+  /** Plan where the truck goes today. Fuel is paid now; it leaves when the day starts. A plan that has
+   *  not left yet can be changed (its fuel comes back), and choosing where it already is cancels it. */
+  function truckGo(id) {
+    var st = SS.state, T = st && st.truck, c = cityDef(id), R = T && T.route;
+    if (!T) return { ok: false, reason: 'Buy the food truck first.', days: 0, fuel: 0 };
+    if (!c) return { ok: false, reason: 'That place is not on the map.', days: 0, fuel: 0 };
+    if (st.phase !== 'prep') return { ok: false, reason: 'Plan the trip in the morning, before you open.', days: 0, fuel: 0 };
+    if (R && R.left < R.total) return { ok: false, reason: 'The truck is on the road to ' + cityDef(R.to).name + '. It gets there in ' + R.left + (R.left === 1 ? ' day.' : ' days.'), days: 0, fuel: 0 };
+    var tr = trip(T.at, id), back = R ? R.fuel : 0;
+    if (R && R.to === id) return { ok: true, reason: '', days: R.total, fuel: R.fuel };
+    if (st.cash + back + 1e-9 < tr.fuel) return { ok: false, reason: 'Fuel to ' + c.name + ' costs ' + money(tr.fuel) + '. You have ' + money(st.cash + back) + '.', days: tr.days, fuel: tr.fuel };
+    if (R) {
+      T.route = null;
+      st.cash = r2(st.cash + back);
+      emit('cash', { amount: st.cash, delta: back, reason: 'fuel' });
+    }
+    if (tr.days) {
+      T.route = { from: T.at, to: id, left: tr.days, total: tr.days, fuel: tr.fuel };
+      st.cash = r2(st.cash - tr.fuel);
+      emit('cash', { amount: st.cash, delta: -tr.fuel, reason: 'fuel' });
+    }
+    emit('truck:set', {});
+    afterPrepSpend(st);
+    persist(true);
+    return { ok: true, reason: '', days: tr.days, fuel: tr.fuel };
+  }
+  function truckSetOpen(on) {
+    var st = SS.state;
+    if (!st || !st.truck) return { ok: false, reason: 'Buy the food truck first.' };
+    st.truck.open = !!on;
+    emit('truck:set', {});
+    persist(false);
+    return { ok: true, reason: '' };
+  }
+  function truckSetPrice(p) {
+    var st = SS.state, T = st && st.truck;
+    if (!T) return D.truck.priceStart;
+    T.price = r2(clamp(r05(fin(Number(p), T.price)), D.price.min, D.price.max));
+    emit('truck:set', {});
+    persist(false);
+    return T.price;
+  }
+  /** Daily profit range for trading at `id` on the first day the truck could be there. */
+  function truckEstimate(id) {
+    var st = SS.state, c = cityDef(id), T = st && st.truck;
+    var out = { cupsLo: 0, cupsHi: 0, lo: 0, hi: 0, rent: c && c.traffic > 0 ? c.rent : 0, fuel: 0, days: 0, sure: 1 };
+    if (!st || !c) return out;
+    var day = st.phase === 'prep' ? st.day : st.day + 1, from = T ? T.at : 'home', wait = 0, daysAt = 0;
+    if (T && T.route && (T.route.left < T.route.total || st.phase === 'day')) { from = T.route.to; wait = T.route.left - (st.phase === 'day' ? 1 : 0); }
+    else if (T && T.at === id) daysAt = T.daysAt;
+    // shortcut: a trip planned this morning still counts from where the truck stands, which is what truckGo would charge
+    var tr = trip(from, id);
+    out.fuel = tr.fuel; out.days = tr.days + wait;
+    if (!(c.traffic > 0)) return out;
+    var fc = cityForecast(id, day + out.days), lo = truckSales(st, id, day + out.days, daysAt, 0, fc), hi = truckSales(st, id, day + out.days, daysAt, 1, fc);
+    var a = r2(lo.revenue - lo.supplies - c.rent), b = r2(hi.revenue - hi.supplies - c.rent);
+    out.cupsLo = lo.cups; out.cupsHi = hi.cups;
+    out.lo = Math.min(a, b); out.hi = Math.max(a, b);   // below cost, more cups lose more
+    out.sure = fc.confidence;
+    return out;
+  }
+  /** Day start: the truck leaves, keeps driving, pays the day's rent where it trades, or stays parked. */
+  function truckStart(st) {
+    var T = st.truck, R = T && T.route;
+    if (!T) return null;
+    var o = { status: 'parked', city: T.at, rent: 0, fuel: 0 }, c = cityDef(T.at);
+    if (R) {
+      o.status = 'travelling'; o.city = R.to;
+      if (R.left === R.total) { o.fuel = R.fuel; emit('truck:depart', { from: R.from, to: R.to, days: R.total }); }
+      return o;
+    }
+    if (!T.open || !c || !(c.traffic > 0)) return o;
+    if (st.cash + 1e-9 < c.rent) {
+      toast('Rent in ' + c.name + ' is ' + money(c.rent) + ', so the truck stays shut today.', 'bad', 'coin');
+      return o;
+    }
+    st.cash = r2(st.cash - c.rent);
+    o.status = 'trading'; o.rent = c.rent;
+    if (c.rent > 0) emit('cash', { amount: st.cash, delta: -c.rent, reason: 'rent' });
+    return o;
+  }
+  /** Day end: drive on (and maybe arrive), or sell. -> DayResult.truck */
+  function truckEnd(st) {
+    var T = st.truck, o = rt.truck;
+    if (!T || !o) return null;
+    var res = { city: o.city, status: o.status, cups: 0, revenue: 0, supplies: 0, rent: o.rent, fuel: o.fuel, profit: 0, weather: cityWeather(o.city, st.day) };
+    if (o.status === 'travelling' && T.route) {
+      if (--T.route.left <= 0) {
+        T.at = T.route.to; T.route = null; T.daysAt = 0;
+        if (T.visited.indexOf(T.at) < 0) T.visited.push(T.at);
+        res.status = 'arrived';
+      }
+    } else if (o.status === 'trading') {
+      var s = truckSales(st, o.city, st.day, T.daysAt, dayRng(st.seed, st.day, 700 + cityIdx(o.city))());
+      if (s.cups * (s.per - s.price) > st.cash + 1e-9) {          // selling below cost: supplies are bought as it goes, so it stops when the cash runs out
+        s.cups = Math.floor(st.cash / (s.per - s.price) + 1e-9);
+        s.revenue = r2(s.cups * s.price); s.supplies = r2(s.cups * s.per);
+      }
+      res.cups = s.cups; res.revenue = s.revenue; res.supplies = s.supplies; res.weather = s.weather;
+      T.daysAt++;
+      T.total.days++;
+    } else T.daysAt = Math.max(0, T.daysAt - 1);                 // a day off lets the crowd miss you a little
+    res.profit = r2(res.revenue - res.supplies - res.rent - res.fuel);
+    var before = st.cash;
+    st.cash = r2(Math.max(0, st.cash + res.revenue - res.supplies));   // max: only a cent of rounding, the cups above stop at the cash
+    if (st.cash !== before) emit('cash', { amount: st.cash, delta: r2(st.cash - before), reason: 'truck' });
+    st.lifetimeEarnings = r2(st.lifetimeEarnings + res.revenue);
+    T.total.cups += res.cups;
+    T.total.revenue = r2(T.total.revenue + res.revenue);
+    T.total.costs = r2(T.total.costs + res.supplies + res.rent + res.fuel);
+    T.total.profit = r2(T.total.profit + res.profit);
+    return res;
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Customisation
+   * ------------------------------------------------------------------ */
+  function customOwned(target, slot, id) {
+    if (slot === 'name') return !!D.custom[target];
+    return hasLook(SS.state && SS.state.custom, target, slot, id);
+  }
+  function customBuy(target, slot, id) {
+    var st = SS.state, d = cdef(target, slot, id);
+    if (!st) return { ok: false, reason: 'Start a game first.' };
+    if (!d) return { ok: false, reason: 'That is not in the catalogue.' };
+    if (!st.custom) st.custom = D.customDefaults();
+    if (customOwned(target, slot, id)) return { ok: false, reason: 'You already own ' + d.label + '.' };
+    if (!shopOpen(st)) return { ok: false, reason: SHOP_CLOSED };
+    if ((target === 'truck' || d.req === 'truck') && !st.truck) return { ok: false, reason: 'Buy the food truck first.' };
+    var m = d.req && d.req !== 'truck' ? D.byId(D.milestones, d.req) : null;
+    if (m && st.milestonesDone.indexOf(m.id) < 0) return { ok: false, reason: d.label + ' unlocks with the "' + m.title + '" goal.' };
+    if (st.cash + 1e-9 < d.cost) return { ok: false, reason: 'You need ' + money(d.cost - st.cash) + ' more for ' + d.label + '.' };
+    st.cash = r2(st.cash - d.cost);
+    st.custom.owned.push(ckey(target, slot, id));
+    emit('custom:buy', { target: target, slot: slot, id: id });
+    emit('cash', { amount: st.cash, delta: -d.cost, reason: 'custom' });
+    afterPrepSpend(st);
+    persist(true);
+    return { ok: true, reason: '' };
+  }
+  /** Equip an owned option; 'decor' toggles one decoration (four at most); 'name' takes a string. */
+  function customSet(target, slot, value) {
+    var st = SS.state, slots = D.customSlots[target];
+    if (!st) return { ok: false, reason: 'Start a game first.' };
+    if (!slots || slots.indexOf(slot) < 0) return { ok: false, reason: 'That cannot be changed.' };
+    if (!st.custom) st.custom = D.customDefaults();
+    var look = st.custom[target];
+    if (slot === 'name') value = look.name = cleanName(target, value);
+    else {
+      var d = cdef(target, slot, value);
+      if (!d) return { ok: false, reason: 'That is not in the catalogue.' };
+      if (!customOwned(target, slot, value)) return { ok: false, reason: 'Buy ' + d.label + ' first.' };
+      if (slot === 'decor') {
+        var i = look.decor.indexOf(value);
+        if (i >= 0) look.decor.splice(i, 1);
+        else if (look.decor.length >= 4) return { ok: false, reason: 'Four decorations at most. Take one down first.' };
+        else look.decor.push(value);
+      } else look[slot] = value;
+    }
+    emit('custom:set', { target: target, slot: slot, value: value });
+    persist(false);
+    return { ok: true, reason: '' };
+  }
+  function customAppeal(target) {
+    var st = SS.state, look = st && st.custom && st.custom[target], slots = D.customSlots[target], sum = 0;
+    if (!look || !slots) return 0;
+    slots.forEach(function (slot) {
+      if (slot === 'name') return;
+      (slot === 'decor' ? look.decor || [] : [look[slot]]).forEach(function (id) { var d = cdef(target, slot, id); if (d && d.appeal) sum += d.appeal; });
+    });
+    return Math.min(D.custom.appealCap, r2(sum));
+  }
+
+  /* ------------------------------------------------------------------ *
+   * "Mom Got Groceries!": rolled with the day, delivered on the sim clock
+   * ------------------------------------------------------------------ */
+  function rollGroceries(st) {
+    var G = D.groceries, r = dayRng(st.seed, st.day, 61), last = fin(st.groceriesLast, 0);
+    if (!G || st.day < G.firstDay || (last > 0 && st.day - last < G.gap) || r() >= G.chance) return null;
+    var keys = ITEMS.filter(function (it) { return !!G.items[it]; }), kept = [], items = zeros();
+    var at = Math.round(lerp(0.2, 0.7, r()) * SS.DAY_LENGTH * 10) / 10;
+    keys.forEach(function (it) { if (r() < G.keep) kept.push(it); });
+    while (kept.length < Math.min(2, keys.length)) { var k = keys[Math.floor(r() * keys.length) % keys.length]; if (kept.indexOf(k) < 0) kept.push(k); }
+    kept.forEach(function (it) { var g = G.items[it]; items[it] = Math.min(g[1], Math.floor(g[0] + (g[1] - g[0] + 1) * r())); });
+    return { at: at, eta: G.eta, done: false, items: items };
+  }
+  function deliverGroceries(st, td, bags) {
+    bags.done = true;
+    ITEMS.forEach(function (it) { st.stock[it] += bags.items[it] || 0; });
+    st.groceriesLast = st.day;
+    if (td.soldOut && cupsFrom(st, st.stock).cups >= 1) { td.soldOut = null; rt.soldOutAt = null; }   // back in business
+    emit('groceries', { items: cleanBags(bags.items) });
+  }
+
+  /* ------------------------------------------------------------------ *
    * Game lifecycle and settings
    * ------------------------------------------------------------------ */
   function init() {
@@ -1702,6 +2092,9 @@
     flavorInfo: flavorInfo, buyFlavor: buyFlavor, milestoneProgress: milestoneProgress,
     regularsInfo: regularsInfo, dealerInfo: dealerInfo, buyDeal: buyDeal, boostActive: boostActive,
     cupsPerPitcher: cupsPerPitcher, brewTime: brewTime, serveTime: serveTime, rent: rent,
+    truckUnlocked: truckUnlocked, buyTruck: buyTruck, truckGo: truckGo, truckSetOpen: truckSetOpen, truckSetPrice: truckSetPrice,
+    truckEstimate: truckEstimate, cityWeather: cityWeather, cityForecast: cityForecast,
+    customOwned: customOwned, customBuy: customBuy, customSet: customSet, customAppeal: customAppeal,
     TUNE: TUNE
   };
 })();

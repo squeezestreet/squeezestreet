@@ -21,6 +21,12 @@
  *   arrive  leave    replay Dex rolling in and setting up / play him packing up and rolling off (he stays away until
  *                    the next phase or 'arrive'); in the console: SS.Actors.replay('arrive' | 'leave')
  *   boost:golden     make a boost active
+ *   truck            own the food truck (parked at home) and get +$3000
+ *   city:harbor      the truck (owned if needed) stands and trades at that city; put it before 'start'
+ *   groceries        Mom's car arrives ~3 s into the running day (before 'start': 3 s after it starts)
+ *   look:stand.decor=costume   equip a look, owning it first (decor adds one; look:truck.name=ZESTY sets a name)
+ *   ownall           own every customisation option
+ * e.g. index.html#debug=new,truck,city:neon,stock,start,groceries   or   #debug=new,ownall,look:stand.paint=squeezy
  */
 (function () {
   'use strict';
@@ -49,6 +55,23 @@
       { id: 'shield', kind: 'boost', sold: false }, { id: 'cotton', kind: 'limited', sold: false }] };
     st.boosts = st.boosts || [];
     if (st.boosts.indexOf('golden') < 0) st.boosts.push('golden');
+  }
+
+  // same shape as sim.js freshTruck(); set directly so it works in any phase (buyTruck needs the shop open)
+  function ownTruck(st) {
+    if (!st.truck) st.truck = { at: 'home', route: null, open: true, price: SS.DATA.truck.priceStart, daysAt: 0, visited: ['home'],
+      total: { days: 0, cups: 0, revenue: 0, costs: 0, profit: 0 } };
+    return st.truck;
+  }
+  function momIn3s() {
+    var td = SS.state.today;
+    if (td) td.groceries = { at: td.clock + 3, eta: SS.DATA.groceries.eta, done: false, items: { lemons: 70, sugar: 50, ice: 180, cups: 110 } };
+  }
+  function custom(st) { return st.custom || (st.custom = SS.DATA.customDefaults()); }
+  function own(st, target, slot, id) {
+    var list = SS.DATA.custom[target] && SS.DATA.custom[target][slot], d = Array.isArray(list) ? SS.DATA.byId(list, id) : null, key = target + '.' + slot + '.' + id;
+    if (d && d.cost > 0 && custom(st).owned.indexOf(key) < 0) st.custom.owned.push(key);
+    return d;
   }
 
   function fakeScene() {
@@ -111,6 +134,31 @@
       case 'dealer': fakeDealer(); break;
       case 'arrive': case 'leave': setTimeout(function () { if (SS.Actors && SS.Actors.replay) SS.Actors.replay(k); }, 60); break;
       case 'boost': st.boosts = st.boosts || []; if (st.boosts.indexOf(a) < 0) st.boosts.push(a); break;
+      case 'truck': ownTruck(st); st.cash = (st.cash || 0) + 3000; break;
+      case 'city':
+        if (!SS.DATA.byId(SS.DATA.cities, a)) { console.warn('[SS.Debug] unknown city', a); break; }
+        kv = ownTruck(st);
+        kv.at = a; kv.route = null; kv.open = true; kv.daysAt = 0;
+        if (kv.visited.indexOf(a) < 0) kv.visited.push(a);
+        break;
+      case 'groceries':
+        if (st.phase === 'day' && st.today) momIn3s();
+        else SS.on('day:start', function once() { SS.off('day:start', once); momIn3s(); });
+        break;
+      case 'look':
+        kv = a.split('=');
+        i = kv[0].split('.');
+        if (i[1] !== 'name' && !own(st, i[0], i[1], kv[1])) { console.warn('[SS.Debug] unknown look', a); break; }
+        if (i[1] === 'decor' && custom(st).stand.decor.indexOf(kv[1]) >= 0) break;     // already up: customSet would take it down
+        if (Sim.customSet) Sim.customSet(i[0], i[1], kv[1]);
+        break;
+      case 'ownall':
+        Object.keys(SS.DATA.customSlots).forEach(function (t) {
+          SS.DATA.customSlots[t].forEach(function (slot) {
+            (Array.isArray(SS.DATA.custom[t][slot]) ? SS.DATA.custom[t][slot] : []).forEach(function (d) { own(st, t, slot, d.id); });
+          });
+        });
+        break;
       case 'rep': st.reputation = Number(a); break;
       case 'day': st.day = Number(a); break;
       case 'loc':

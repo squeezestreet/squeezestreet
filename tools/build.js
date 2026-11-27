@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-/* Bundle the game into ONE self-contained file (CSS, JS, fonts and favicons inlined, debug.js left out).
+/* Bundle the game into ONE self-contained file (CSS, JS, fonts and favicons inlined, debug.js left out;
+ * admin.js stays in for testing: the CrazyGames zip from package-crazygames.js leaves it out).
  *   node tools/build.js                 -> dist/squeeze-street.html, a page fragment without <html>/<head>/<body>
  *                                          wrappers so it can be published as a hosted page (browsers open it fine too)
  *   node tools/build.js --doc out.html  -> a complete standalone document (doctype and all) at out.html
@@ -23,6 +24,7 @@ html = html.replace(/<script src="(js\/[^"]+)"><\/script>\n?/g, (_, p) =>
 html = html.replace(/href="(favicon[^"]*\.(svg|png))"/g, (_, p, ext) =>
   `href="data:image/${ext === 'svg' ? 'svg+xml' : 'png'};base64,${fs.readFileSync(path.join(root, p)).toString('base64')}"`);
 if (/(src|href)="((js|css|fonts)\/|favicon)/.test(html)) throw new Error('a local file was left un-inlined');
+if (/SS\.Debug =/.test(html)) throw new Error('debug.js made it into the build');
 
 if (!docOut) {
   html = html
