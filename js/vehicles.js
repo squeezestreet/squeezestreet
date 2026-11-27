@@ -2,7 +2,7 @@
  *   SS.Vehicles.drawTruck(ctx, look, opts)   side view, origin on the ground under the middle, facing +x, ~360 units long.
  *       look = state.custom.truck (missing fields fall back to DATA.customDefaults().truck)
  *       opts { open 0..1 (awning, default 1), driving 0..1, wheel radians, night 0..1, t seconds, price, vendor bool, driver bool, reduced }
- *   SS.Vehicles.drawCar(ctx, opts)           Mom's family car, same conventions, ~190 long; opts { wheel, door 0..1, driver bool, night }
+ *   SS.Vehicles.drawCar(ctx, opts)           Mom's family car, same conventions, ~270 long; opts { wheel, door 0..1, driver bool, night }
  *   SS.Vehicles.drawPostcard(ctx, w, h, cityId, t, look, opts)   a live scene of the truck in a city (campaign screen)
  *       opts { status 'trading'|'travelling'|'parked' (default: read from the state), weather {type}, reduced }
  *   SS.Vehicles.update / draw (called by render.js between the actors and the front props): the truck parked by the
@@ -400,7 +400,8 @@
   }
 
   /* ------------------------------------------------------------------ Mom's car */
-  var CAR_R = 19, CAR_WHEELS = [-60, 62], CAR_COL = '#7fd3c8';
+  // STRETCH: the wagon was drawn short; stretched to a car's length (backdrops.js: ~2.25x a person long, 0.85x tall)
+  var CAR_R = 19, CAR_WHEELS = [-60, 62], CAR_COL = '#7fd3c8', STRETCH = 1.3;
   var MOM = { skin: '#e3ab7f', hair: '#6b3b22', shirt: '#ffffff', cardigan: '#ff9ec4', skirt: '#7a5cff', pants: '#e3ab7f', s: 1, hat: 'sun', hatCol: '#f4d58d', blush: true };
   function carBody(ctx) {
     var a = Math.asin(6 / 25), i;
@@ -414,6 +415,7 @@
     opts = opts || {};
     var rot = opts.wheel || 0, door = SS.clamp(opts.door || 0, 0, 1), night = SS.clamp(opts.night || 0, 0, 1), i;
     ctx.save(); ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    ctx.save(); ctx.scale(STRETCH, 1);                                                          // body only: the wheels stay round
     ctx.fillStyle = 'rgba(19,26,58,.22)'; ctx.beginPath(); ctx.ellipse(0, 1, 104, 7, 0, 0, TAU); ctx.fill();
     for (i = 0; i < 2; i++) { ctx.beginPath(); ctx.arc(CAR_WHEELS[i], -CAR_R, 25, Math.PI, 0); ctx.closePath(); ctx.fillStyle = '#20243a'; ctx.fill(); }
     carBody(ctx); ctx.fillStyle = CAR_COL; ctx.fill();
@@ -439,7 +441,7 @@
     ink(ctx, door > 0.02 ? mix(CAR_COL, '#ffffff', 0.15) : null, 2.5);
     ctx.beginPath(); ctx.moveTo(4, -88); ctx.lineTo(26, -88); ctx.quadraticCurveTo(36, -86, 42, -68); ctx.lineTo(4, -68); ctx.closePath(); ink(ctx, glass, 2.5);
     if (opts.driver && door <= 0.02) {                                                        // Mom at the wheel, sunhat and all
-      ctx.save(); ctx.clip(); circ(ctx, 20, -72, 10, MOM.skin, 2.5);
+      ctx.save(); ctx.clip(); ctx.translate(20, 0); ctx.scale(1 / STRETCH, 1); ctx.translate(-20, 0); circ(ctx, 20, -72, 10, MOM.skin, 2.5);
       ctx.beginPath(); ctx.ellipse(20, -80, 18, 4, -0.08, 0, TAU); ink(ctx, MOM.hatCol, 2.5);
       ctx.beginPath(); ctx.ellipse(19, -84, 10, 7, 0, Math.PI, TAU); ctx.closePath(); ink(ctx, MOM.hatCol, 2.5); ctx.restore();
     }
@@ -449,8 +451,9 @@
     circ(ctx, 94, -54, 6, '#fff4b8', 2.5); box(ctx, -99, -60, 7, 13, 3, '#ff6257', 2.5);
     box(ctx, 88, -38, 16, 11, 4, '#c9cde6', 2.5); box(ctx, -104, -38, 14, 11, 4, '#c9cde6', 2.5);
     if (night > 0.05) { glow(ctx, '#fff1bf', 104, -54, 26, night); glow(ctx, '#ff5a4a', -100, -54, 14, night * 0.8); }
+    ctx.restore();
     for (i = 0; i < 2; i++) {
-      var x = CAR_WHEELS[i], y = -CAR_R;
+      var x = CAR_WHEELS[i] * STRETCH, y = -CAR_R;
       circ(ctx, x, y, CAR_R, '#2b2f45', 3); circ(ctx, x, y, 9, '#e6e9f5', 2.5);
       ctx.strokeStyle = INK; ctx.lineWidth = 2; ctx.beginPath();
       for (var j = 0; j < 4; j++) { var a = rot + j * TAU / 4; ctx.moveTo(x + Math.cos(a) * 3, y + Math.sin(a) * 3); ctx.lineTo(x + Math.cos(a) * 8, y + Math.sin(a) * 8); }
@@ -462,7 +465,7 @@
   /* ------------------------------------------------------------------ the street scene */
   // ground depth (world units from the back edge of the pavement, like laneY) of the truck's and the car's wheels:
   // just off the curb, so they stand in front of everyone on the pavement
-  var TRUCK_Y = 126, CAR_Y = 138, TRUCK_K = 0.95;
+  var TRUCK_Y = 126, CAR_Y = 138, TRUCK_K = 1.03;   // truck: about 1.8x a person to the roof (see backdrops.js)
   var NONE = 0, PARKED = 1, LEAVE = 2, ARRIVE = 3;
   var tk = { mode: NONE, x: null, x0: 0, t: 0, wheel: 0, horn: false }, dex = { at: -1e9, on: false };
   /** is the truck standing at home right now? (a trip planned this morning has not left yet) */
@@ -530,7 +533,7 @@
   // the car pulls up just past the stand's right end (in front of it, it hid the counter and the queue's feet); she walks
   // back along the car to the stand. On a portrait phone that spot is off the edge: you see her drive past, then walk in.
   var mom = null, STOP_X = W.STAND_X + 250, SPOT = { x: W.STAND_X + 118, y: 8 + 0.5 * (W.SIDEWALK_H - 8) };
-  var PATH = [[STOP_X + 22, CAR_Y + 4], [STOP_X - 104, CAR_Y + 4], [SPOT.x, SPOT.y]], CAR_K = 1;   // roof rack level with the stand's base
+  var CAR_K = 0.97, PATH = [[STOP_X + 22 * STRETCH * CAR_K, CAR_Y + 4], [STOP_X - 104 * STRETCH * CAR_K, CAR_Y + 4], [SPOT.x, SPOT.y]];   // roof rack level with the stand's base
   var BACKWARD = PATH[1][0] < PATH[0][0];
   var pose = { car: 0, wheel: 0, door: 0, driver: true, out: false, x: 0, y: 0, dir: 1, walk: 0, carry: true, wave: 0, heart: -1, bags: -1 };
   SS.on('groceries:incoming', function (p) {
@@ -615,7 +618,7 @@
     cs = view.scale * CAR_K; cx = view.toX(P.car); cy = view.groundY + CAR_Y * view.scale;
     var momFront = P.out && P.y > CAR_Y;
     if (P.out && !momFront) drawMom(ctx, view, env, P);
-    if (cx + 120 * cs > 0 && cx - 120 * cs < view.w) {
+    if (cx + 140 * STRETCH * cs > 0 && cx - 140 * STRETCH * cs < view.w) {
       ctx.save(); ctx.translate(cx, cy); ctx.scale(cs, cs);
       drawCar(ctx, { wheel: P.wheel, door: P.door, driver: P.driver, night: night });
       ctx.restore();

@@ -567,14 +567,19 @@
       circ(g, s * 48, -13, 16, dk); circ(g, s * 48, -13, 13.2, '#262a31'); circ(g, s * 48, -13, 7.6, '#d5dae0'); circ(g, s * 48, -13, 3, '#8c939c');
     }
   }
-  function carSprite(S, col, kind) { return S.sprite(176, 82, 88, 74, function (g) { paintCar(g, col, kind); }); }
+  /* Everything on the road is drawn at the size of a person at the front of the pavement (SS.W.CHAR_H x 1.1 = 121 units,
+     about 1.7 m): a car is about 0.85 of that tall and 2.25 long, a cyclist about as tall as a person, so cars, bikes,
+     Mom's car (vehicles.js), the food truck and the people all agree. */
+  var CAR_K = 1.62, BIKE_K = 1.1;
+  function carSprite(S, col, kind) { return S.sprite(176 * CAR_K, 82 * CAR_K, 88 * CAR_K, 74 * CAR_K, function (g) { g.scale(CAR_K, CAR_K); paintCar(g, col, kind); }); }
   /** head-lamp beams and a tail-light glow for a car at x (wheels on y), heading dir */
   function carLights(ctx, x, y, dir, a) {
     if (a <= 0.01) return;
     ctx.globalCompositeOperation = 'lighter';
-    glow(ctx, '#fff1bf', x + dir * 118, y - 20, 62, a * 0.5, 17);
-    glow(ctx, '#fff6d6', x + dir * 78, y - 27, 13, a * 0.9);
-    glow(ctx, '#ff5a4a', x - dir * 79, y - 27, 10, a * 0.7);
+    var K = CAR_K;
+    glow(ctx, '#fff1bf', x + dir * 118 * K, y - 20 * K, 62 * K, a * 0.5, 17 * K);
+    glow(ctx, '#fff6d6', x + dir * 78 * K, y - 27 * K, 13 * K, a * 0.9);
+    glow(ctx, '#ff5a4a', x - dir * 79 * K, y - 27 * K, 10 * K, a * 0.7);
     ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
   }
 
@@ -834,7 +839,7 @@
     var backTrees = [treeSprite(S, 51, 330, hazePal(LEAF.deep, '#9fc7c9', 0.2), true, { res: 0.7 }), treeSprite(S, 67, 300, hazePal(LEAF.fresh, '#9fc7c9', 0.24), false, { res: 0.7 })];
     var lamp = S.sprite(40, 162, 8, 160, function (g) { paintLamp(g, 'street'); });
     var cars = [carSprite(S, '#e2574c', 'car'), carSprite(S, '#4d9bb5', 'car'), carSprite(S, '#f1e6c8', 'van')];
-    var bike = S.sprite(84, 104, 42, 102, paintCyclist);
+    var bike = S.sprite(112 * BIKE_K, 128 * BIKE_K, 56 * BIKE_K, 124 * BIKE_K, function (g) { g.scale(BIKE_K, BIKE_K); paintCyclist(g); });
     var wagon = S.sprite(64, 44, 32, 42, paintWagon);
 
     S.strip({ name: 'hills', p: 0.22, top: 260, bot: 12, res: 0.5, rk: 0.3, paint: function (g, a, b) {
@@ -917,33 +922,49 @@
     S.fn(1, function (ctx, va, vb, env) {                 // FRONT: parked car, a toy wagon, traffic now and then
       var i, x, t = env.t, na = clamp((LT.night - 0.3) * 5, 0, 1), k, T, u, truck = SS.state && SS.state.truck;
       for (i = floor(va / 1150) - 1; i * 1150 < vb + 200; i++) {
-        x = i * 1150 + 900; if (x > va - 100 && x < vb + 100 && !(truck && i === 0)) put(ctx, cars[((i % 3) + 3) % 3], x, 168, 1);   // the food truck parks in that spot
+        x = i * 1150 + 900; if (x > va - 150 && x < vb + 150 && !(truck && i === 0)) put(ctx, cars[((i % 3) + 3) % 3], x, 168, 1);   // the food truck parks in that spot
         x = i * 1150 + 96; if (x > va - 40 && x < vb + 40) put(ctx, wagon, x, 138, 1);
       }
       if (env.reduced) return;
       T = 17; k = floor(t / T); u = (t - k * T) / 5.2;    // a cyclist every so often
-      if (u < 1) { x = lerp(va - 60, vb + 60, k % 2 ? 1 - u : u); if (k % 2) putFlip(ctx, bike, x, 152 + sin(t * 9) * 0.6, 1); else put(ctx, bike, x, 152 + sin(t * 9) * 0.6, 1); }
+      if (u < 1) { x = lerp(va - 80, vb + 80, k % 2 ? 1 - u : u); if (k % 2) putFlip(ctx, bike, x, 134 + sin(t * 9) * 0.6, 1); else put(ctx, bike, x, 134 + sin(t * 9) * 0.6, 1); }   // wheels just above the day bar (140)
       T = 23; k = floor((t + 9) / T); u = ((t + 9) - k * T) / 3.4;   // and a car
-      if (u < 1) { x = lerp(va - 110, vb + 110, u); put(ctx, cars[(k + 1) % 3], x, 236, 1.12); carLights(ctx, x, 236, 1, na); }
+      if (u < 1) { x = lerp(va - 160, vb + 160, u); put(ctx, cars[(k + 1) % 3], x, 236, 1); carLights(ctx, x, 236, 1, na); }
     }, true);
   }
 
-  function paintCyclist(g) {                              // wheels on y=0, heading right
-    var s;
-    ell(g, 0, 1, 34, 3.4, 'rgba(10,14,26,.25)');
-    for (s = -1; s <= 1; s += 2) {
-      g.strokeStyle = '#2b2f38'; g.lineWidth = 2.6; g.beginPath(); g.arc(s * 24, -15, 13.6, 0, TAU); g.stroke();
-      g.strokeStyle = 'rgba(200,205,212,.8)'; g.lineWidth = 0.6;
-      for (var k = 0; k < 8; k++) { g.beginPath(); g.moveTo(s * 24, -15); g.lineTo(s * 24 + cos(k * PI / 4) * 12.6, -15 + sin(k * PI / 4) * 12.6); g.stroke(); }
-      circ(g, s * 24, -15, 2, '#8c939c');
+  function paintCyclist(g) {                              // wheels on y=0, heading right; drawn like the people (actors.js)
+    var INK = '#1b1f3b', SKIN = '#e3ab7f', SHIRT = '#4cc3f0', PANTS = '#2f3a6b', FRAME = '#e2574c', i, k;
+    function lim(x1, y1, x2, y2, w, col) {                // ink underlay, then colour, like actors.js limb()
+      g.lineCap = 'round'; g.beginPath(); g.moveTo(x1, y1); g.lineTo(x2, y2);
+      g.strokeStyle = INK; g.lineWidth = w + 5; g.stroke(); g.strokeStyle = col; g.lineWidth = w; g.stroke();
     }
-    g.strokeStyle = '#e2574c'; g.lineWidth = 2.6; g.lineJoin = 'round'; g.lineCap = 'round';
-    g.beginPath(); g.moveTo(-24, -15); g.lineTo(-8, -40); g.lineTo(16, -40); g.lineTo(-2, -15); g.lineTo(-24, -15); g.moveTo(-2, -15); g.lineTo(-8, -40); g.moveTo(16, -40); g.lineTo(24, -15); g.moveTo(16, -40); g.lineTo(14, -50); g.lineTo(21, -52); g.stroke();
-    rr(g, -15, -45, 13, 3.6, 1.6, '#2b2f38');
-    g.strokeStyle = '#3d5a80'; g.lineWidth = 6; g.beginPath(); g.moveTo(-8, -46); g.lineTo(4, -30); g.lineTo(-2, -15); g.stroke();            // leg
-    g.strokeStyle = '#ffd166'; g.lineWidth = 11; g.beginPath(); g.moveTo(-8, -50); g.lineTo(6, -72); g.stroke();                               // torso
-    g.strokeStyle = '#f2b28c'; g.lineWidth = 4.4; g.beginPath(); g.moveTo(6, -70); g.lineTo(14, -58); g.lineTo(20, -53); g.stroke();           // arm
-    circ(g, 11, -82, 8, '#f2b28c'); g.fillStyle = '#3f8fb0'; g.beginPath(); g.arc(11, -84, 8.6, PI * 1.05, PI * 2.05); g.closePath(); g.fill();
+    ell(g, 0, 1, 50, 4, 'rgba(10,14,26,.25)');
+    for (i = -1; i <= 1; i += 2) {                        // wheels: 0.68 m across
+      g.beginPath(); g.arc(i * 34, -21, 19, 0, TAU); g.strokeStyle = INK; g.lineWidth = 7; g.stroke();
+      g.strokeStyle = '#3d4257'; g.lineWidth = 3.5; g.stroke();
+      g.strokeStyle = 'rgba(200,205,212,.9)'; g.lineWidth = 1;
+      for (k = 0; k < 8; k++) { g.beginPath(); g.moveTo(i * 34, -21); g.lineTo(i * 34 + cos(k * PI / 4) * 16, -21 + sin(k * PI / 4) * 16); g.stroke(); }
+      circ(g, i * 34, -21, 3.2, INK);
+    }
+    lim(-34, -21, -6, -21, 3.5, FRAME); lim(-6, -21, -14, -54, 3.5, FRAME); lim(-14, -54, -34, -21, 3.5, FRAME);   // frame
+    lim(-14, -54, 20, -57, 3.5, FRAME); lim(-6, -21, 20, -57, 3.5, FRAME); lim(20, -57, 34, -21, 3.5, FRAME);
+    lim(20, -57, 18, -68, 3, '#8c939c'); lim(13, -68, 26, -67, 3, '#8c939c');
+    lim(-6, -21, 4, -15, 2.5, '#8c939c'); lim(-6, -21, -16, -27, 2.5, '#8c939c');                                // cranks
+    lim(-14, -58, 4, -42, 9, mixHex(PANTS, INK, 0.25)); lim(4, -42, -16, -27, 9, mixHex(PANTS, INK, 0.25));        // far leg
+    rr(g, -24, -61, 18, 6, 3, INK); rr(g, -23, -60, 16, 4, 2, '#3d4257');                                         // saddle
+    lim(-14, -58, 10, -48, 9, PANTS); lim(10, -48, 4, -15, 9, PANTS);                                             // near leg
+    rr(g, -2, -18, 13, 7, 3, INK); rr(g, -1, -17, 11, 5, 2, '#ffffff');                                            // shoe
+    g.save(); g.translate(-8, -74); g.rotate(0.45);        // torso, leaning into the ride
+    rr(g, -15, -19, 30, 40, 9, INK); rr(g, -12.5, -16.5, 25, 35, 7, SHIRT); g.restore();
+    lim(0, -88, 22, -68, 7, SHIRT);                       // arm to the bars
+    circ(g, 22, -68, 4.5, INK); circ(g, 22, -68, 3, SKIN);
+    circ(g, 8, -103, 17.5, INK); circ(g, 8, -103, 15, SKIN);                                                       // head
+    g.fillStyle = INK; g.beginPath(); g.arc(8, -105, 18.5, PI * 1.02, PI * 1.98); g.closePath(); g.fill();         // helmet
+    g.fillStyle = '#ff9f43'; g.beginPath(); g.arc(8, -105, 16, PI * 1.05, PI * 1.95); g.closePath(); g.fill();
+    rr(g, 18, -108, 10, 3.5, 1.7, INK);                   // visor
+    circ(g, 16, -101, 2.2, INK); circ(g, 4, -101, 2.2, INK);
+    g.strokeStyle = INK; g.lineWidth = 2.2; g.lineCap = 'round'; g.beginPath(); g.arc(11, -96, 4.5, 0.15 * PI, 0.85 * PI); g.stroke();
     g.lineCap = 'butt';
   }
   function paintWagon(g) {
@@ -1971,15 +1992,15 @@
       var t = env.t, na = clamp((LT.night - 0.25) * 5, 0, 1), j, k, u, x, n, im, tt;
       for (j = floor(va / DGAP) - 1; j * DGAP < vb + 200; j++) { x = j * DGAP + 62; if (x > va - 60 && x < vb + 60 && LT.wet < 0.6) smoke(ctx, x, 144, env, j + 5, 1.05); }
       if (env.reduced) {                                  // nothing sweeping past: a cab waits at the kerb instead
-        for (j = floor(va / DGAP) - 1; j * DGAP < vb + 200; j++) { x = j * DGAP + 150; if (x > va - 100 && x < vb + 100) { put(ctx, cars[0], x, 172, 1); carLights(ctx, x, 172, 1, na * 0.6); } }
+        for (j = floor(va / DGAP) - 1; j * DGAP < vb + 200; j++) { x = j * DGAP + 150; if (x > va - 150 && x < vb + 150) { put(ctx, cars[0], x, 172, 1); carLights(ctx, x, 172, 1, na * 0.6); } }
         return;
       }
       for (k = 0; k < 4; k++) {                           // two streams a lane; a lane shares one speed so nobody overtakes
         var near = k > 1, T = near ? 8.4 : 7, dur = near ? 3.0 : 3.5;
         tt = t + [0, 3.1, 1.3, 5.2][k]; n = floor(tt / T); u = (tt - n * T) / dur;
         if (u >= 1 || H(n, 950 + k) < 0.12) continue;
-        im = cars[floor(H(n, 960 + k) * cars.length)]; x = lerp(va - 120, vb + 120, near ? 1 - u : u);
-        if (near) { putFlip(ctx, im, x, 252, 1.14); carLights(ctx, x, 252, -1, na); } else { put(ctx, im, x, 174, 1); carLights(ctx, x, 174, 1, na); }
+        im = cars[floor(H(n, 960 + k) * cars.length)]; x = lerp(va - 160, vb + 160, near ? 1 - u : u);
+        if (near) { putFlip(ctx, im, x, 252, 1); carLights(ctx, x, 252, -1, na); } else { put(ctx, im, x, 174, 1); carLights(ctx, x, 174, 1, na); }
       }
     }, true);
   }
