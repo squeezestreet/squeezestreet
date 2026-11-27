@@ -257,8 +257,14 @@
         h('div', { class: 'prep-sum-total' }, h('dt', null, 'Cash left after'), prep.sumLeft)),
       prep.boosts);
 
+    // day 1 with a cart that already makes a cup: shopping and recipe fold away, so the first screen is the forecast, the price and Open
+    var info0 = S && S.prepInfo ? safe('prepInfo', S.prepInfo) : null;
+    var more = st.day === 1 && info0 && num(info0.maxCups) >= 1 ? h('details', { class: 'prep-more prep-in', style: '--i:3', ontoggle: function () { SS.sfx('click'); } },
+      h('summary', { class: 'prep-more-sum' }, I('check', 'prep-more-ico'), h('span', null, h('b', null, 'Shopping and recipe: ready'), ' (tap to change)')),
+      market, recipe) : null;
+    if (more) [market, recipe].forEach(function (s) { s.removeAttribute('data-tut'); });   // coach tips must not point into the closed fold
     body.append(h('div', { class: 'prep' }, head,
-      h('div', { class: 'prep-cols' }, h('div', { class: 'prep-col' }, forecast, news, market), h('div', { class: 'prep-col' }, recipe, price, sum))));
+      h('div', { class: 'prep-cols' }, h('div', { class: 'prep-col' }, forecast, news, more || market), h('div', { class: 'prep-col' }, more ? null : recipe, price, sum))));
     prep.truck = safe('truck card', truckPrepSlot);
     if (prep.truck) (news || forecast).after(prep.truck.el);
 
@@ -268,8 +274,8 @@
     prep.reason = h('p', { class: 'prep-reason', role: 'status' }, prep.reasonIco, prep.reasonText);
     prep.go = h('button', { class: 'btn btn--go btn--lg prep-go', type: 'button', 'data-tut': 'open', onclick: function () {
       var r = S && S.startDay ? S.startDay() : null;
-      if (r && r.ok === false) { SS.sfx('error'); patchPrep(); restart(prep && prep.reason, 'prep-shake'); }
-    } }, 'Open for business');
+      if (r && r.ok === false && prep) { SS.sfx('error'); patchPrep(); prep.reason.classList.add('is-bad'); restart(prep.reason, 'prep-shake'); }
+    } }, h('span', { class: 'prep-go-long' }, 'Open for business'), h('span', { class: 'prep-go-short' }, 'Open!'));
     prep.deals = navBtn('dealer', 'Deals', 'dealer');
     prep.deals.classList.add('prep-deals');
     prep.deals.setAttribute('data-tut', 'deals');
@@ -361,10 +367,20 @@
     cls(prep.sumLeft, 'bad', info.cashAfter < -0.004);
 
     prep.go.disabled = !info.canStart;
-    var ok = !!info.canStart, ico = ok ? 'check' : 'warning';
+    // an empty cart is where every morning starts, not a mistake: a calm nudge. Red is kept for an Open press that fails.
+    var ok = !!info.canStart, none = !ok && info.maxCups < 1, why = info.reason || 'Not ready yet.', ly = st.lastResult;
+    var want = ok && ly && ly.day === st.day - 1 ? Math.round(num(ly.cups) + num(ly.people && ly.people.soldout)) : 0;   // yesterday's cups plus sold-out turn-aways
+    var low = want > 0 && info.maxCups < 0.8 * want;
+    var msg = none ? 'Add ' + item.name.toLowerCase() + ' to your cart to open.' + (why.indexOf('Cancelling') >= 0 ? why.slice(why.indexOf('Cancelling')) : '')   // keep sim's truck fuel hint
+      : !ok ? why
+      : low ? 'Only ' + int(info.maxCups) + ' ' + plural(info.maxCups, 'cup') + '. About ' + int(want) + ' people wanted one yesterday, so you may sell out early.'
+      : int(info.maxCups) + ' ' + plural(info.maxCups, 'cup') + ' ready to sell at ' + money(st.price) + ' each.';
+    var ico = none ? item.icon : ok && !low ? 'check' : 'warning';
     if (prep.reasonKey !== ico) { prep.reasonKey = ico; prep.reasonIco.innerHTML = SS.icon(ico); }
-    txt(prep.reasonText, ok ? int(info.maxCups) + ' ' + plural(info.maxCups, 'cup') + ' ready to sell at ' + money(st.price) + ' each.' : info.reason || 'Not ready yet.');
-    cls(prep.reason, 'is-ok', ok);
+    if (prep.reasonText._t !== msg) cls(prep.reason, 'is-bad', false);
+    txt(prep.reasonText, msg);
+    cls(prep.reason, 'is-ok', ok && !low);
+    cls(prep.reason, 'is-warn', low || (!ok && !none));
     patchPrepDex(st);
     if (prep.truck) safe('truck card', prep.truck.refresh);
   }
@@ -467,10 +483,16 @@
     if (s.ran) return;
     s.ran = true;
     safe('results reveal', function () { s.fn(instant); });
-    if (!instant && s.el && res && res.follow) {
+    // a closed "Day details" still reports layout boxes for what is inside it: never scroll after those
+    if (!instant && s.el && res && res.follow && !s.el.closest('details:not([open])')) {
       var b = body.getBoundingClientRect(), r = s.el.getBoundingClientRect();
       if (r.bottom > b.bottom - 8) body.scrollTo({ top: body.scrollTop + Math.min(r.bottom - b.bottom + 20, r.top - b.top - 8), behavior: 'smooth' });
     }
+  }
+  function revealDone() {
+    res.done = true;
+    res.root.classList.add('is-done');
+    if (res.skip) res.skip.remove();
   }
   function finishReveal() {
     if (!res || res.done) return;
@@ -478,8 +500,8 @@
     res.root.classList.add('res--instant');
     // every step again, instantly: steps are idempotent, and this snaps counters that were still ticking
     res.steps.forEach(function (s) { s.ran = true; safe('results reveal', function () { s.fn(true); }); });
-    res.done = true;
-    res.root.classList.add('is-done');
+    revealDone();
+    body.scrollTop = 0;                                     // land on "Day N done" and the profit, not where the reveal had scrolled
   }
   function playReveal() {
     if (SS.reduced()) { finishReveal(); return; }
@@ -488,7 +510,11 @@
       lastAt = Math.max(lastAt, s.at);
       res.timers.push(setTimeout(function () { if (res) runStep(s, false); }, s.at));
     });
-    res.timers.push(setTimeout(function () { if (res) { res.done = true; res.root.classList.add('is-done'); } }, lastAt + 700));
+    res.timers.push(setTimeout(function () {
+      if (!res) return;
+      revealDone();
+      if (res.follow) body.scrollTo({ top: 0, behavior: 'smooth' });   // back up to the headline, unless the player took over the scrolling
+    }, lastAt + 700));
   }
 
   function spoilText(sp, st) {
@@ -568,7 +594,8 @@
     var hours = h('section', { class: 'res-sec res-hours' }, h('h3', { class: 'display res-sec-title' }, I('chart'), 'Cups by the hour'),
       h('div', { class: 'well res-chart-box' }, chart, peak > 0 ? null : h('p', { class: 'res-empty' }, 'No cups sold today.')),
       peak > 0 ? h('p', { class: 'res-note' }, 'Your busiest hour was ' + HOURS[topAt] + ' with ' + int(peak) + ' ' + plural(peak, 'cup') + '.') : null);
-    step(hours, 420);
+    // hours, crowd, rep and regulars sit in the closed "Day details": they get set up with no wait and no sound
+    step(hours, 0);
 
     /* the crowd */
     var p = r.people, lost = p.pricey + p.wait + p.soldout + p.quit, passed = Math.max(p.passed, p.served + lost), rest = passed - p.served - lost;
@@ -588,7 +615,7 @@
           (lost > 0 ? '. You lost ' + int(lost) + ' who wanted one.' : '.')]
         : 'Nobody walked by today.'),
       h('div', { class: 'res-crowd-track' }, bar), legend);
-    step(crowd, 420);
+    step(crowd, 0);
 
     /* satisfaction + reputation */
     var sat = r.satisfaction, asked = p.served > 0;
@@ -605,7 +632,7 @@
           h('div', { class: 'res-sat-row' }, I(asked ? moodFace(sat * 2 - 1.05) : 'faceMeh', 'res-sat-face'), meter)),
         h('div', { class: 'res-stars' }, h('div', { class: 'res-rep-top' }, h('span', { class: 'label' }, 'Reputation'), delta),
           h('div', { class: 'res-stars-line' }, starsBox, starsN))));
-    step(rep, 520, function (instant) {
+    step(rep, 0, function (instant) {
       if (asked) { meter.style.setProperty('--v', sat.toFixed(3)); SS.countTo(satN, sat * 100, { from: 0, ms: instant ? 0 : 700, fmt: function (v) { return Math.round(v) + '%'; } }); }
       var on = starsBox.querySelector('.stars-on'), wrap = starsBox.querySelector('.stars');
       if (on) on.style.width = (r.repAfter / 5 * 100).toFixed(1) + '%';
@@ -634,14 +661,12 @@
     var regsEmpty = r.regulars.length ? null : h('p', { class: 'well res-regs-empty' }, I(regsNow ? 'calendar' : 'regular'),
       h('span', null, regsNow ? 'Your regulars took the day off. Their streaks are safe.' : 'Make someone really happy and they might come back tomorrow.'));
     var regs = h('section', { class: 'res-sec res-regs' }, regsHead, r.regulars.length ? regsGrid : regsEmpty);
-    step(regsHead, 160);
-    if (regEls.length) regEls.forEach(function (el, i) {
-      step(el, i < 6 ? 120 : 50, function (instant) { if (!instant && i < 6) SS.sfx('tick'); });
-    }); else step(regsEmpty, 200);
+    step(regsHead, 0);
+    if (regEls.length) regEls.forEach(function (el) { step(el, 0); }); else step(regsEmpty, 0);
 
-    /* reviews */
+    /* reviews: three cards are plenty to read */
     var cards = h('div', { class: 'res-reviews-grid' }), reviewEls = [];
-    r.reviews.forEach(function (rv) {
+    r.reviews.slice(0, 3).forEach(function (rv) {
       var mood = SS.clamp(num(rv.mood), -1, 1), kind = D.kinds[rv.who];
       if (rv.kind !== 'great' && rv.kind !== 'cheap') mood = Math.min(mood, 0.1);   // a complaint never gets a smiling face
       var el = h('article', { class: 'res-review res-review--' + (mood > 0.15 ? 'good' : mood > -0.25 ? 'meh' : 'bad') },
@@ -667,15 +692,18 @@
       badges.length ? h('div', { class: 'res-badges' }, h('span', { class: 'label' }, plural(badges.length, 'Goal') + ' reached today'), h('div', { class: 'res-badges-row' }, badges)) : null,
       h('p', { class: 'res-spoil' }, I('ice'), res.spoil));
     step(after, 300, function (instant) { if (!instant && badges.length) SS.sfx('tally'); });
+    var more = h('details', { class: 'res-sec res-more', ontoggle: function () { SS.sfx('click'); } },
+      h('summary', { class: 'res-more-sum' }, I('chart'), 'Day details'), hours, crowd, rep, regs);
+    step(more, 0);
 
     res.root = h('div', { class: 'res', onclick: function (e) { if (!e.target.closest('button, a')) finishReveal(); } },
-      head, h('div', { class: 'res-grid' }, heroBox, hours, crowd, rep, regs, reviews, after),
-      h('span', { class: 'res-skip', 'aria-hidden': 'true' }, 'Tap to skip'));
+      head, h('div', { class: 'res-grid' }, heroBox, reviews, after, more));
     body.append(res.root);
     ['wheel', 'touchmove'].forEach(function (n) { res.root.addEventListener(n, function () { if (res) res.follow = false; }, { passive: true }); });
 
-    /* footer */
-    foot.append(h('div', { class: 'res-foot' }, navBtn('shop', 'Shop', 'shop'), navBtn('map', 'Map', 'map'), navBtn('goals', 'Goals', 'trophy'),
+    /* footer: the skip hint lives here, off the card, until the reveal ends */
+    res.skip = h('button', { class: 'res-skip', type: 'button', onclick: finishReveal }, 'Tap to skip');
+    foot.append(res.skip, h('div', { class: 'res-foot' }, navBtn('shop', 'Shop', 'shop'), navBtn('map', 'Map', 'map'), navBtn('goals', 'Goals', 'trophy'),
       h('button', { class: 'btn btn--go btn--lg res-next', type: 'button', 'data-tut': 'next', onclick: function () { if (S && S.nextDay) S.nextDay(); } }, 'Next day', I('arrowRight'))));
 
     patchResults();
@@ -1183,7 +1211,7 @@
       'Squeeze Street does not collect, sell or share any personal information. There are no accounts, ads, analytics or trackers in the game.',
       'Your progress and settings are saved only in your browser\'s local storage, on your own device. Starting a new game or clearing your browser data deletes them.',
       'The game does not send anything over the internet. Everything it needs, including its fonts, comes with the game.',
-      'If you play on a game website such as CrazyGames or itch.io, that website\'s own privacy policy covers what it collects, such as accounts, ads and cloud saves.',
+      'If you play on a game website such as CrazyGames, that website\'s own privacy policy covers what it collects, such as accounts, ads and cloud saves.',
       'If this policy changes, the new version and its date will appear here.'
     ]],
     ['Terms & Conditions', [
