@@ -1,6 +1,5 @@
 #!/usr/bin/env node
-/* Bundle the game into ONE self-contained file (CSS, JS, fonts and favicons inlined, debug.js left out;
- * admin.js stays in for testing: the CrazyGames zip from package-crazygames.js leaves it out).
+/* Bundle the game into ONE self-contained file (CSS, JS, fonts and favicons inlined, debug.js left out).
  *   node tools/build.js                 -> dist/squeeze-street.html, a page fragment without <html>/<head>/<body>
  *                                          wrappers so it can be published as a hosted page (browsers open it fine too)
  *   node tools/build.js --doc out.html  -> a complete standalone document (doctype and all) at out.html
