@@ -552,7 +552,7 @@
       h('div', { class: 'res-head-chips' },
         h('span', { class: 'chip chip--sky' }, I(wx.icon), wx.name + ' ' + SS.fmtTemp(r.weather.temp)),
         r.event && r.event.title ? h('span', { class: 'chip' }, I(r.event.icon || 'newspaper'), r.event.title) : null));
-    step(head, SS.FX ? 850 : 180);   // FX slams a "CLOSED" stamp over the card first: let it land before the numbers roll
+    step(head, 260);                 // a short beat for the title before the numbers roll
 
     /* hero + tally */
     var profit = r.profit, tone = profit > 0.004 ? 'good' : profit < -0.004 ? 'bad' : '';

@@ -1098,7 +1098,8 @@
     R.hud.hidden = to === 'title';
     R.daybar.hidden = to !== 'day';
     if (pause.el) pause.el.hidden = true;
-    if (to === 'title' || (p && p.from === 'results')) clearBanners();   // the results screen already listed what they said
+    // the results card lists the day's goals and news itself: a banner left over from the last seconds would sit on its title
+    if (to === 'title' || to === 'results' || (p && p.from === 'results')) clearBanners();
     if (to === 'day') resetDay();
     refreshHud();
     refreshDeals();
