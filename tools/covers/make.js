@@ -19,20 +19,21 @@ const STAGE = process.env.SS_STAGE || 'all';
 fs.mkdirSync(WORK, { recursive: true });
 
 /* Per cover: size, camera (px per world unit, screen x of the stand's centre, screen y of the queue's feet),
-   where Dex parks (world x), Dex's idle-cycle time t, and the cast (world x, lane 0 back .. 1 front). */
+   where Dex parks (world x; off screen now), where the food truck's middle stands (world x, at the curb like the game's
+   parked truck), Dex's idle-cycle time t, and the cast (world x, lane 0 back .. 1 front). */
 const FORMATS = {
-  landscape: { size: [1920, 1080], pxu: 2.55, standX: 1245, feetY: 987, dealerX: 645, t: 12.5, cast: [
-    { kind: 'jogger', seed: 4242, x: 372, lane: 0.55, state: 'order' },
-    { kind: 'kid', x: 603, lane: 0.8, dir: -1, state: 'leave', drink: true, bubble: 'love' }
+  landscape: { size: [1920, 1080], pxu: 2.0, standX: 1060, feetY: 900, dealerX: 5000, truckX: 850, t: 12.5, cast: [
+    { kind: 'jogger', seed: 4242, x: 405, lane: 0.55, state: 'order' },
+    { kind: 'teen', x: 590, lane: 0.8, dir: -1, state: 'leave', drink: true, bubble: 'love' }
   ] },
-  portrait: { size: [800, 1200], video: [1080, 1620], pxu: 1.75, standX: 312, feetY: 1140, dealerX: 655, t: 12.5, cast: [
+  portrait: { size: [800, 1200], video: [1080, 1620], pxu: 1.55, standX: 260, feetY: 1050, dealerX: 5000, truckX: 840, t: 12.5, cast: [
     { kind: 'jogger', seed: 4242, x: 372, lane: 0.55, state: 'order' },
-    { kind: 'kid', x: 603, lane: 0.8, dir: -1, state: 'leave', drink: true, bubble: 'love' }
+    { kind: 'teen', x: 590, lane: 0.8, dir: -1, state: 'leave', drink: true, bubble: 'love' }
   ] },
-  square: { size: [800, 800], pxu: 1.2, standX: 330, feetY: 838, dealerX: 680, t: 12.5, cast: [
+  square: { size: [800, 800], pxu: 1.1, standX: 240, feetY: 735, dealerX: 5000, truckX: 860, t: 12.5, cast: [
     { kind: 'jogger', seed: 4242, x: 372, lane: 0.55, state: 'order' },
     { kind: 'kid', x: 330, lane: 0.55, state: 'queue' },
-    { kind: 'kid', x: 612, lane: 0.62, dir: -1, state: 'leave', drink: true, bubble: 'love' }
+    { kind: 'teen', x: 590, lane: 0.8, dir: -1, state: 'leave', drink: true, bubble: 'love' }
   ] }
 };
 const ONLY = (process.env.SS_ONLY || 'landscape,portrait,square').split(',');
@@ -48,12 +49,18 @@ const INIT = `try{localStorage.clear()}catch(e){}
 document.addEventListener('DOMContentLoaded',function(){var s=document.createElement('style');s.textContent='#ui{display:none!important}html,body,#game{background:transparent!important}';document.head.appendChild(s);
 ['hud','sheet','daybar'].forEach(function(id){var el=document.getElementById(id);if(el)Object.defineProperty(el,'hidden',{get:function(){return true},set:function(){}});});});`;
 
-/* After Dex has rolled in: a deluxe cart, no tips, no LIMITED starburst (its offer marked sold), no sky, frozen time; __frame(cfg) places the cast and the camera
+/* After Dex has rolled in: a customised stand (rainbow awning, Squeezy sign, balloons, bunting, flowers, lemon tree),
+   the food truck in its Squeezy wrap drawn at the frame's truckX with its window open (SS.Vehicles.draw swapped, so no Mom; owning it clears the parked car from its spot), a deluxe cart, no tips, no LIMITED starburst (its offer marked sold), no sky, frozen time; __frame(cfg) places the cast and the camera
    (with dt frozen at 0 the camera never eases back to the game's own framing). */
 const SETUP = `(function(){var st=SS.state;Object.assign(st.upgrades,{stand:3,awning:2,sign:1,helper:1,cooler:0,speaker:0,tipjar:1});
 st.today.tips=[];st.dealer.offers.forEach(function(o){if(o.kind==='limited')o.sold=true;});window.__noTag=true;
+st.truck={at:'home',route:null,open:true,price:2,daysAt:0,visited:['home'],total:{days:0,cups:0,revenue:0,costs:0,profit:0}};
+var C=st.custom=SS.DATA.customDefaults();Object.assign(C.stand,{awning:'rainbow',sign:'squeezy',decor:['balloons','bunting','flowers','plant']});
+Object.assign(C.truck,{wrap:'squeezy',topper:'squeezy',lights:'bulbs'});
+SS.Vehicles.draw=function(ctx,v){var x=window.__truckX,s=v.scale*1.03;if(x==null)return;ctx.save();ctx.translate(v.toX(x),v.groundY+126*v.scale);ctx.scale(s,s);
+SS.Vehicles.drawTruck(ctx,C.truck,{open:1,vendor:true,t:SS.debugEnv.t});ctx.restore();};
 SS.Sky.draw=function(){};SS.Sky.drawWeather=function(){};SS.debugEnv.dt=0;
-window.__frame=function(f){var W=SS.W,v=SS.view,td=SS.state.today,id=100;SS.debugEnv.t=f.t;W.DEALER_X=f.dealerX;
+window.__frame=function(f){var W=SS.W,v=SS.view,td=SS.state.today,id=100;SS.debugEnv.t=f.t;W.DEALER_X=f.dealerX;window.__truckX=f.truckX;
 td.customers=f.cast.map(function(o){var st=o.state||'walk',c={id:++id,kind:o.kind,seed:o.seed||id*7919,x:o.x,lane:o.lane,dir:o.dir||1,
 speed:st==='queue'||st==='order'?0:(o.speed||55),state:st,stateT:3,hasDrink:!!o.drink,mood:0.9,patience:1,qty:1,regularId:null,streak:0,mult:1,
 bubble:o.bubble?{type:o.bubble,ttl:2,max:2.5}:null};return c;});

@@ -24,11 +24,14 @@ const FORMATS = {
   portrait: { size: [1080, 1620], view: { view: [390, 585], dpr: 1080 / 390, hidpi: true }, cover: () => path.join(WORK, 'frame0-portrait-1080x1620.png') }
 };
 
-/* A save on its fifth day: tutorial done, sound off, milestones already met (no pop-ups), upgrades bought, Dex in town. */
+/* A save on its fifth day: tutorial done, sound off, milestones already met (no pop-ups), upgrades bought, the food truck
+   parked by the stand, and the same stand and truck looks as the covers. */
 const INIT = `try{localStorage.clear()}catch(e){}
 document.addEventListener('DOMContentLoaded',function(){var r=SS.Debug.run;SS.Debug.run=function(){r.apply(this,arguments);var s=SS.state;s.tutorial={done:true,dex:true};s.settings.sfx=false;s.settings.music=false;
 s.milestonesDone=['first','cups25','profit20','rep3','tinker','regulars5','streak10'];s.lifetimeEarnings=690;s.lifetimeCups=560;s.stats={days:8,bestProfit:58,bestCups:52,tips:14,served:560};};});`;
-const NAV = 'index.html#debug=new,day:5,cash:186.4,rep:3.6,regs:5,dealer,up:stand=3,up:awning=2,up:sign=1,up:helper=1,up:pitcher=1,up:juicer=1,up:cooler=1,stock';
+const LOOKS = ['stand.awning=rainbow', 'stand.sign=squeezy', 'stand.decor=balloons', 'stand.decor=bunting', 'stand.decor=flowers', 'stand.decor=plant',
+  'truck.wrap=squeezy', 'truck.topper=squeezy', 'truck.lights=bulbs'].map((l) => 'look:' + l).join(',');
+const NAV = 'index.html#debug=new,day:5,rep:4.1,truck,cash:186.4,regs:5,up:stand=3,up:awning=2,up:sign=1,up:helper=1,up:pitcher=1,up:juicer=1,up:cooler=1,stock,' + LOOKS;
 const TIP = "(function(){var t=SS.state.today.tips[0],v=SS.view,r=document.getElementById('scene').getBoundingClientRect();if(!t)return null;return [r.left+v.toX(t.x),r.top+v.laneY(t.lane)-12*v.laneScale(t.lane)];})()";
 const ms = (frames) => frames * 1000 / FPS;
 
