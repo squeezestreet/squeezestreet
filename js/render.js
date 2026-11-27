@@ -62,7 +62,7 @@
     var fw = Math.max(200, view.w - inset.left - inset.right);
     var fh = Math.max(180, view.h - inset.bottom);          // the sky may run under the HUD
     // fit ~1000 world units across on wide screens, zoom in on tall ones (within reason), never tiny
-    var s = Math.max(fh / 820, Math.min(fw / 420, fh / 540)), tall = fh > fw;
+    var s = Math.max(fh / 820, Math.min(fw / 420, fh / 540)), tall = view.h > view.w;   // the screen, not the free area: a sheet docked right is not portrait
     s = Math.max(s, view.w / 1700);
     if (tall) s = Math.min(s, fw / (fw >= 700 ? 850 : 650));   // portrait: a street's worth of customers, not a close-up of the stand
     var viewW = fw / s;

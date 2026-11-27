@@ -74,6 +74,7 @@
     else if (k === 'b' && !SS.paused) SS.Sim.ringBell();
     else return;
     e.preventDefault();                                  // handled: Space must not also press the button clicked last
+    if (tag === 'BUTTON' || tag === 'A') e.target.blur();   // nor on keyup, where some browsers press it whatever keydown said
   }
 
   function boot() {
