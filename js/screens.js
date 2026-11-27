@@ -257,9 +257,9 @@
         h('div', { class: 'prep-sum-total' }, h('dt', null, 'Cash left after'), prep.sumLeft)),
       prep.boosts);
 
-    // day 1 with a cart that already makes a cup: shopping and recipe fold away, so the first screen is the forecast, the price and Open
+    // day 1 with a cart that can open the stand: shopping and recipe fold away, so the first screen is the forecast, the price and Open
     var info0 = S && S.prepInfo ? safe('prepInfo', S.prepInfo) : null;
-    var more = st.day === 1 && info0 && num(info0.maxCups) >= 1 ? h('details', { class: 'prep-more prep-in', style: '--i:3', ontoggle: function () { SS.sfx('click'); } },
+    var more = st.day === 1 && info0 && info0.canStart ?h('details', { class: 'prep-more prep-in', style: '--i:3', ontoggle: function () { SS.sfx('click'); } },
       h('summary', { class: 'prep-more-sum' }, I('check', 'prep-more-ico'), h('span', null, h('b', null, 'Shopping and recipe: ready'), ' (tap to change)')),
       market, recipe) : null;
     if (more) [market, recipe].forEach(function (s) { s.removeAttribute('data-tut'); });   // coach tips must not point into the closed fold
@@ -368,9 +368,12 @@
 
     prep.go.disabled = !info.canStart;
     // an empty cart is where every morning starts, not a mistake: a calm nudge. Red is kept for an Open press that fails.
-    var ok = !!info.canStart, none = !ok && info.maxCups < 1, why = info.reason || 'Not ready yet.', ly = st.lastResult;
+    // "none" only when stock is the one thing missing: short on rent or an over-budget cart keeps the sim's own words (e.g. "set up on Maple Street")
+    var ok = !!info.canStart, none = !ok && info.maxCups < 1 && info.cashAfter > -0.005, why = info.reason || 'Not ready yet.', ly = st.lastResult;
     var want = ok && ly && ly.day === st.day - 1 ? Math.round(num(ly.cups) + num(ly.people && ly.people.soldout)) : 0;   // yesterday's cups plus sold-out turn-aways
-    var low = want > 0 && info.maxCups < 0.8 * want;
+    // judged against today's forecast and spot, so a stormy morning after a sunny day never asks for more stock
+    var k = want > 0 ? Math.min(1, pull((st.forecast || {}).type, st.location) / pull(ly.weather && ly.weather.type, ly.location)) : 0;
+    var low = want > 0 && info.maxCups < 0.8 * want * k;
     var msg = none ? 'Add ' + item.name.toLowerCase() + ' to your cart to open.' + (why.indexOf('Cancelling') >= 0 ? why.slice(why.indexOf('Cancelling')) : '')   // keep sim's truck fuel hint
       : !ok ? why
       : low ? 'Only ' + int(info.maxCups) + ' ' + plural(info.maxCups, 'cup') + '. About ' + int(want) + ' people wanted one yesterday, so you may sell out early.'
@@ -384,6 +387,9 @@
     patchPrepDex(st);
     if (prep.truck) safe('truck card', prep.truck.refresh);
   }
+
+  /** how many buyers a spot draws in that weather, relative (the sim's crowd scales with traffic, and buying with thirst) */
+  function pull(wx, loc) { var w = D.weather[wx], l = D.byId(D.locations, loc); return w && l ? w.traffic * w.thirst * l.traffic : 0; }
 
   /** the Deals button (with a badge while a limited edition is unsold) and today's boost chips */
   function patchPrepDex(st) {
