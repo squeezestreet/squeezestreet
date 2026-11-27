@@ -300,8 +300,26 @@
     bar.floatMeter = h('div', { class: 'meter daybar-float-meter' }, h('i'));
     bar.closeBtn = btn('btn btn--sm btn--primary', 'Close up early', onCloseEarly);
     bar.float = h('div', { class: 'daybar-float', role: 'status', hidden: true }, bar.floatIco, bar.floatMeter, bar.floatText, bar.closeBtn);
-    bar.panel = h('div', { class: 'daybar-panel panel' }, bar.float, ctl, stats);
+    bar.goalText = h('span', { class: 'daybar-goal-text' });
+    bar.goal = h('div', { class: 'chip daybar-goal', hidden: true }, ico('trophy'), bar.goalText);
+    bar.panel = h('div', { class: 'daybar-panel panel' }, bar.float, bar.goal, ctl, stats);
     R.daybar.replaceChildren(bar.panel);
+  }
+
+  /** The first goal not reached yet ('Next: Lunch rush 14/25'), hidden once every goal is done. Runs on sales, not per frame. */
+  function refreshGoal() {
+    if (!bar.goal) return;
+    var m = null, p = null, i;
+    for (i = 0; i < D.milestones.length && !m; i++) {
+      p = sim('milestoneProgress', D.milestones[i].id);
+      if (p && !p.done && p.value < p.target) m = D.milestones[i];          // reached goals pay at closing: already behind us
+    }
+    bar.goal.hidden = !m;
+    bar.panel.classList.toggle('has-goal', !!m);
+    if (!m) return;
+    var cur = m.kind === 'dayProfit' || m.kind === 'lifetime' ? SS.CURRENCY : '';
+    var f = function (v) { return m.kind === 'rep' ? stars1(v) : cur + SS.fmtInt(Math.floor(Math.max(0, v))); };
+    put(bar.goalText, 'Next: ' + m.title + (p.target > 1 ? ' ' + f(p.value) + '/' + f(p.target) : ''));
   }
 
   function onBell() {
@@ -316,6 +334,7 @@
   function onCloseEarly() {
     var td = SS.state && SS.state.today;
     if (!td) return;
+    if (!td.soldOut) { sim('closeEarly'); return; }          // a dead rainy day: nothing to lose, so no question
     confirmBox({
       title: 'Close up early?', icon: 'clock',
       text: 'You are out of ' + itemName(td.soldOut) + ', so nobody else can buy today. Close the stand now and see how the day went?',
@@ -328,15 +347,19 @@
     bar.stock.forEach(function (c) { c.n = -1; c.lvl = -1; });
     if (SS.state && bar.price) bar.price.set(SS.state.price);
     if (hud.track) hud.track.style.setProperty('--t', 0);
+    refreshGoal();
   }
+  /** mode 1: mixing a batch, 2: sold out (Close up early asks first), 3: a rainy day gone quiet (Close up early closes) */
   function setFloat(mode, out) {
     dv.fm = mode; dv.out = out;
     bar.float.hidden = !mode;
     bar.float.classList.toggle('is-out', mode === 2);
+    bar.float.classList.toggle('is-wet', mode === 3);
     bar.floatMeter.hidden = mode !== 1;
-    bar.closeBtn.hidden = mode !== 2;
+    bar.closeBtn.hidden = mode < 2;
     if (mode === 1) { setIcon(bar.floatIco, 'juicer'); put(bar.floatText, 'Tap the stand to squeeze faster'); }
     else if (mode === 2) { setIcon(bar.floatIco, 'warning'); put(bar.floatText, 'Out of ' + itemName(out)); }
+    else if (mode === 3) { setIcon(bar.floatIco, out === 'storm' ? 'storm' : 'rain'); put(bar.floatText, 'Quiet day'); }
   }
 
   /** Runs every frame during the day. Only writes to the DOM when a shown value changed. */
@@ -398,7 +421,9 @@
       bar.sold.el.style.color = fl ? fl.color : '';
     }
 
-    var out = td.soldOut || '', mode = out ? 2 : brewing && dv.brewLong ? 1 : 0;
+    // a rainy or stormy day can be cut short once it is well under way and nobody is waiting
+    var wx = s.weather && s.weather.type, wet = (wx === 'rainy' || wx === 'storm') && t > 0.4 && !(td.queue && td.queue.length);
+    var out = td.soldOut || (wet ? wx : ''), mode = td.soldOut ? 2 : wet ? 3 : brewing && dv.brewLong ? 1 : 0;
     if (dv.fm !== mode || dv.out !== out) setFloat(mode, out);
   }
 
@@ -739,6 +764,9 @@
   }
   function onMilestone(p) {
     p = p || {};
+    refreshGoal();
+    var lr = SS.state && SS.state.lastResult;
+    if (phase === 'results' && lr && Array.isArray(lr.milestones) && lr.milestones.indexOf(p.id) >= 0) return;   // the results card lists the day's goals
     banner({ icon: 'trophy', label: 'Goal complete', title: p.title || 'Nicely done', reward: Number(p.reward) || 0, kind: 'goal', goal: true, sq: 'cheer' });
   }
 
@@ -814,19 +842,19 @@
   /* ------------------------------------------------------------------ *
    * Coach tips for a first-time player
    * ------------------------------------------------------------------ */
+  /* One tip before day 1, two action prompts while it runs, and two more on the day-2 morning (prep2), then the lesson is over.
+   * act: no Next button; it goes when the player does the thing (see init), taps the bubble, or after ms. The clock keeps running. */
   var TIPS = {
     prep: [
-      { at: 'market', text: 'Start with the shopping. Buy lemons, sugar, ice and cups for today. Two packs of each is plenty for a first morning.' },
-      { at: 'recipe', text: 'This is your recipe. More lemons and sugar make a tastier cup that costs more to pour. Add extra ice when it is hot.' },
-      { at: 'price', text: 'Now name your price. Too high and people walk on by. Too low and you sell out with little to show for it.' },
-      { at: 'open', text: 'All set? Open the stand and watch the street come to life.' }
+      { at: 'open', text: 'Your stand is stocked. Open up and watch the street come to life.' }
     ],
     day: [
-      { at: 'bell', text: 'Ring the bell to call passers-by over. It takes a little while to recharge, so save it for a quiet moment.' },
-      { at: 'stand', text: 'When the pitcher runs dry, a new batch gets mixed. Tap the stand to squeeze faster, and tap coins on the ground to pick up tips.' }
+      { at: 'bell', act: true, text: 'Ring the bell to call people over.' },
+      { at: 'stand', act: true, ms: 6000, text: 'Tap the stand to squeeze faster. Tap coins for tips.' }
     ],
-    results: [
-      { at: 'next', text: 'Read the reviews first: they tell you what to fix tomorrow. Then head into the next day.' }
+    prep2: [
+      { at: 'market', text: 'We filled your cart from yesterday\'s sales. Change anything you like.' },
+      { at: 'recipe', text: 'Reviews tell you what to tweak in the recipe and price.' }
     ]
   };
   var DEX_TIP = [
@@ -858,12 +886,19 @@
   function dexHere() { var i = sim('dealerInfo'); return !!(i && i.present); }
   function tutStart(ph) {
     var s = SS.state, t = s && s.tutorial;
-    if (t && !t.done && ph === 'prep' && s.day > 1) tutFinish();      // they have been round once: lesson over
-    if (!t || t.done || !TIPS[ph]) { tutClear(); return; }           // Dex's first-visit tip waits for his show (onDexReady)
-    tutBegin(ph, TIPS[ph], ph === 'day' ? 1300 : 700);
+    var steps = !s ? null : s.day <= 1 ? TIPS[ph] : s.day === 2 && ph === 'prep' ? TIPS.prep2 : null;
+    if (t && !t.done && !steps && s.day > 1) tutFinish();            // past the day-2 morning: lesson over
+    if (!t || t.done || !steps) { tutClear(); return; }               // Dex's first-visit tip waits for his show (onDexReady)
+    tutBegin(ph, steps, ph === 'day' ? 1300 : 700);
   }
   function tutBegin(ph, steps, ms) {
-    if (coach.phase === ph && coach.steps) return;
+    if (coach.phase === ph && coach.steps) {                 // tips already running this phase (Dex on the day-2 morning): queue these after them
+      if (coach.steps.indexOf(steps[0]) < 0) {
+        coach.steps = coach.steps.concat(steps);
+        if (!coach.el) { clearTimeout(coach.timer); coach.timer = setTimeout(tutStep, ms); }
+      }
+      return;
+    }
     tutClear();
     coach.phase = ph; coach.steps = steps; coach.i = 0; coach.tries = 0;
     coach.timer = setTimeout(tutStep, ms);
@@ -879,8 +914,8 @@
     tutDrop();
     var steps = coach.steps, step = steps && steps[coach.i];
     if (!steps) return;
-    if (!step) {                                             // this phase is done; the last phase ends the lesson
-      if (coach.phase === 'results') tutFinish(); else coach.steps = [];
+    if (!step) {                                             // this phase is done; after the day-2 morning the lesson is over
+      if (SS.state && SS.state.day > 1) tutFinish();
       return;
     }
     var node = tutAnchor(step.at);
@@ -900,13 +935,15 @@
     var last = coach.i === steps.length - 1;
     coach.node = node;
     coach.ring = h('div', { class: 'coach-ring', 'aria-hidden': 'true' });
-    coach.el = h('div', { class: 'coach-bubble has-sq', role: 'status' },
+    coach.el = h('div', { class: 'coach-bubble has-sq' + (step.act ? ' is-act' : ''), role: 'status' },
       squeezy('talk'), h('p', { class: 'coach-text' }, step.text),
-      h('div', { class: 'coach-foot' }, btn('coach-skip', 'Skip tips', tutFinish), btn('btn btn--primary', last ? 'Got it' : 'Next', tutNext)),
+      step.act ? null : h('div', { class: 'coach-foot' }, btn('coach-skip', 'Skip tips', tutFinish), btn('btn btn--primary', last ? 'Got it' : 'Next', tutNext)),
       h('i', { class: 'coach-arrow' }));
+    if (step.act) coach.el.addEventListener('click', tutNext);       // nothing to press, so a tap on it puts it away
     R.coach.append(coach.ring, coach.el);
     coach.bw = coach.el.offsetWidth; coach.bh = coach.el.offsetHeight;
     coach.side = '';
+    if (step.ms) coach.timer = setTimeout(tutNext, step.ms);     // before trackCoach, which may move on (and clear it) at once
     trackCoach();
   }
   /** Keep the bubble glued to its anchor (sheets scroll, the camera eases). Writes only on change. */
@@ -922,16 +959,18 @@
       l = v.toX(G.STAND_X) - w / 2; t = v.laneY(G.STAND_LANE) - ht;
     } else {
       if (!node.isConnected || !node.getClientRects().length) { tutStep(); return; }
-      var r = node.getBoundingClientRect(), o = R.coach.getBoundingClientRect(), f = node.closest('.prep-foot, .res-foot');
+      var r = node.getBoundingClientRect(), o = R.coach.getBoundingClientRect(), f = node.closest('.prep-foot, .res-foot, .daybar-panel');
+      var lift = f && f.classList.contains('daybar-panel') ? 60 : 0;      // the day bar's hint pill and goal tab sit above it
       l = r.left - o.left; t = r.top - o.top; w = r.width; ht = r.height;
-      if (f) { f = f.getBoundingClientRect(); bar = { l: f.left - o.left, t: f.top - o.top, w: f.width, h: f.height }; }
+      if (f) { f = f.getBoundingClientRect(); bar = { l: f.left - o.left, t: f.top - o.top - lift, w: f.width, h: f.height + lift }; }
     }
     if (!coach.bw) { coach.bw = coach.el.offsetWidth; coach.bh = coach.el.offsetHeight; }
     var bw = coach.bw, bh = coach.bh, gap = 18, m = 8, top0 = R.hud.hidden ? m : W <= 520 ? 76 : 66;
-    var side, x, y, cy = t + Math.min(ht / 2, 70);
+    var side, x, y, cy = t + Math.min(ht / 2, 70), step = coach.steps && coach.steps[coach.i];
     // an anchor in a bottom action bar: keep the whole bar clear (its other buttons and the reason line)
     var k = bar || { l: l, t: t, w: w, h: ht };
-    if (k.w < W * 0.6 && k.l > W * 0.4 && k.l - gap - m >= bw) side = 'left';
+    // a tip over the running street goes above its anchor when it can, clear of the stand and the queue beside it
+    if (!(step && step.act) && k.w < W * 0.6 && k.l > W * 0.4 && k.l - gap - m >= bw) side = 'left';
     else if (k.t - top0 - gap >= bh) side = 'top';
     else if (H - (k.t + k.h) - gap - m >= bh) side = 'bottom';
     else if (k.l - gap - m >= bw) side = 'left';
@@ -956,7 +995,8 @@
       coach.ring.style.cssText = 'left:' + (l - 6) + 'px;top:' + (t - 6) + 'px;width:' + (w + 12) + 'px;height:' + (ht + 12) + 'px';
     }
   }
-  function tutOn(at) { return !!coach.el && !!coach.steps && !!coach.steps[coach.i] && coach.steps[coach.i].at === at; }
+  /** the current tip points at this, shown or still on its way (ringing the bell before its tip lands still counts) */
+  function tutOn(at) { return !!coach.steps && !!coach.steps[coach.i] && coach.steps[coach.i].at === at; }
 
   /* ------------------------------------------------------------------ *
    * Title screen
@@ -976,7 +1016,7 @@
     R.title.replaceChildren(
       h('div', { class: 'title-corner' }, ttl.snd, btn('btn btn--icon', ico('gear'), openSettings, { 'aria-label': 'Settings', title: 'Settings' })),
       logo,
-      h('p', { class: 'title-tag' }, 'Run the sunniest lemonade stand in town.'),
+      h('p', { class: 'title-tag' }, 'Squeeze one stand into a lemonade empire.'),
       ttl.actions);
   }
   /** tapping the lemon (decorative, so not a button): a squish, a wink, a leaf flick and a spray of juice.
@@ -1115,6 +1155,8 @@
     });
     SS.on('bell', function () { if (tutOn('bell')) tutNext(); });
     SS.on('brew:tap', function () { if (tutOn('stand')) tutNext(); });
+    SS.on('tip:collect', function (p) { if (tutOn('stand') && !(p && p.auto)) tutNext(); });
+    SS.on('sale', refreshGoal);
 
     document.addEventListener('keydown', onKey, true);
     document.addEventListener('pointerdown', function (e) {

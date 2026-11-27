@@ -196,8 +196,7 @@
 .daybar-price { display: flex; align-items: center; gap: 8px; }
 .daybar-price .label { display: none; }
 .daybar-price .stepper-val { min-width: 4.3ch; }
-.daybar-price .stepper-btn { position: relative; }
-.daybar-price .stepper-btn::after { content: ''; position: absolute; inset: -8px -6px; }   /* 46 x 50 touch target */
+.daybar-price .stepper-btn::after { inset: -8px -6px; }   /* 52 x 56 touch target */
 
 .daybar-speed { display: flex; flex: 0 0 auto; height: 50px; overflow: hidden; background: var(--paper); border: var(--line) solid var(--ink); border-radius: 14px; box-shadow: var(--drop); }
 .daybar-speed-btn { min-width: 44px; padding: 0 6px; font-weight: 900; font-size: var(--fs-md); color: var(--ink); background: none; border: 0; transition: background .15s; }
@@ -222,10 +221,18 @@
 @keyframes daybar-stripes { to { background-position: -39.6px 0; } }
 
 .daybar-float { position: absolute; left: 50%; bottom: calc(100% + 12px); display: flex; align-items: center; gap: 8px; max-width: 100%; padding: 5px 14px 5px 8px; font-size: var(--fs-sm); font-weight: 800; white-space: nowrap; background: var(--paper); border: var(--line) solid var(--ink); border-radius: 999px; box-shadow: var(--drop); transform: translateX(-50%); animation: daybar-float-in .28s var(--spring) backwards; }
-.daybar-float.is-out { padding-right: 5px; background: #ffe3e0; }
+.daybar-float.is-out, .daybar-float.is-wet { padding-right: 5px; }
+.daybar-float.is-out { background: #ffe3e0; }
 .daybar-float .ico { width: 1.6em; height: 1.6em; }
 .daybar-float-meter { flex: 0 0 56px; height: 12px; }
 @keyframes daybar-float-in { 0% { opacity: 0; transform: translateX(-50%) translateY(10px) scale(.85); } 100% { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); } }
+
+/* The next goal, a tab on the panel's top edge (the float moves up to clear it) */
+.daybar-panel.has-goal { padding-top: 16px; }
+.daybar-panel.has-goal .daybar-float { bottom: calc(100% + 20px); }
+.daybar-goal { position: absolute; left: 14px; top: 0; max-width: calc(100% - 28px); min-height: 24px; padding: 1px 10px 1px 5px; gap: 4px; font-size: var(--fs-xs); background: var(--lemon-pale); transform: translateY(-50%); pointer-events: none; }
+.daybar-goal .ico { width: 1.4em; height: 1.4em; vertical-align: 0; }
+.daybar-goal-text { overflow: hidden; text-overflow: ellipsis; }
 
 /* Tight spaces show only the current speed; tapping it steps to the next one (ui.js checks for the hidden buttons) */
 @media (max-width: 479px), (max-width: 959px) and (max-height: 480px) {
@@ -260,6 +267,41 @@
   .daybar-price .label { display: none; }
   .daybar-panel { gap: 10px; padding: 6px 12px; }
   .daybar-stats { padding: 0 10px; gap: 4px; }
+}
+/* Small phones (360 and 320 wide, or held sideways, 800x450 too): everything fits inside the panel, pause button included */
+@media (max-width: 380px), (max-height: 480px) and (orientation: landscape) {
+  .daybar-panel { padding-left: 6px; padding-right: 6px; }
+  .daybar-ctl { gap: 4px; }
+  .daybar-bell { width: 44px; height: 44px; }
+  .daybar-bell-face { inset: 6px; }
+  .daybar-price .stepper { gap: 2px; }
+  .daybar-price .stepper-btn { width: 34px; height: 34px; }   /* the ::after above keeps a 46 x 50 touch target */
+  .daybar-price .stepper-val { min-width: 4ch; font-size: var(--fs-sm); }   /* room for $19.95 at 320 wide */
+  .daybar-speed { height: 44px; }
+  .daybar-speed-btn.is-on { min-width: 44px; }
+  .daybar-pause { width: 44px; min-width: 44px; min-height: 44px; }
+  .daybar-stats { gap: 1px; }
+  .daybar-stats > * { min-width: 0; }
+  .daybar-stat { padding: 2px 1px; font-size: .6875rem; }
+  .daybar-stat .ico { width: 19px; height: 19px; }
+  .daybar-pit { gap: 3px; }
+  .daybar-pit > .ico { width: 22px; height: 22px; }
+  .daybar-pit-col { min-width: 36px; font-size: .6875rem; }
+}
+/* A phone held sideways: the HUD and the day bar take one row each, so the street gets most of the screen */
+@media (max-height: 420px) and (orientation: landscape) {
+  #hud { grid-template-columns: auto minmax(0, 1fr) auto auto auto; grid-template-areas: "day sub deals stats menu"; align-items: center; }
+  .hud-sub, #hud.is-day .hud-sub { width: auto; justify-self: stretch; }
+  .daybar-panel { flex-direction: row; align-items: center; width: auto; max-width: 100%; gap: 8px; padding: 6px 8px; }
+  .daybar-panel.has-goal { padding-top: 12px; }
+  .daybar-ctl { display: contents; }
+  .daybar-bell { order: 1; }
+  .daybar-price { order: 2; }
+  .daybar-price .label { display: none; }
+  .daybar-stats { order: 3; gap: 4px; padding: 0 8px; border-top: 0; border-left: 2px solid var(--ink-faint); border-right: 2px solid var(--ink-faint); }
+  .daybar-stat[data-stock], .daybar-stat[data-stock] + .daybar-sep { display: none; }
+  .daybar-speed { order: 4; }
+  .daybar-pause { order: 5; }
 }
 
 /* ====================================================================== *
@@ -411,6 +453,9 @@
 .coach-bubble[data-side="left"] .coach-arrow { top: var(--ay, 50%); right: -10px; margin-top: -8px; transform: rotate(-45deg); }
 .coach-bubble[data-side="right"] .coach-arrow { top: var(--ay, 50%); left: -10px; margin-top: -8px; transform: rotate(135deg); }
 .coach-bubble[data-side="over"] .coach-arrow, .coach-bubble:not([data-side]) .coach-arrow { display: none; }
+/* an action prompt: one short line beside Squeezy, no buttons (a tap on it puts it away) */
+.coach-bubble.is-act { display: flex; align-items: center; min-height: 64px; padding-top: 10px; padding-bottom: 10px; cursor: pointer; }
+.coach-bubble.is-act .coach-text { margin: 0; }
 
 /* ====================================================================== *
  * Title screen
