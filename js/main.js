@@ -38,6 +38,7 @@
   function sceneLive(st) { return !!st && (st.phase === 'day' || st.phase === 'prep') && !SS.paused && !document.querySelector('#modal-root > *'); }
   function onScenePress(e) {
     var st = SS.state;
+    if (e.button > 0) return;                            // right or middle click: not a tap
     if (!sceneLive(st) || !SS.Sim) return;
     var hit = hitAt(e);
     if (!hit) return;
@@ -51,11 +52,15 @@
     e.currentTarget.style.cursor = hit && (st.phase === 'day' || hit.type === 'dealer') ? 'pointer' : '';
   }
 
-  /* Keyboard: Space/P pause, 1-3 speed, B bell, M mute. Ignored while typing or on a control. */
+  /* Keyboard: Space/P pause, 1-3 speed, B bell, M mute. Ignored while typing or on a control reached by keyboard. */
+  var keyFocus = false;                                  // the focused control was reached by keyboard, not left there by a click
+  // read on arrival: Chrome counts any focus as :focus-visible once a key is pressed; no :focus-visible support keeps the old rule
+  function onFocus(e) { try { keyFocus = e.target.matches(':focus-visible'); } catch (err) { keyFocus = true; } }
   function onKey(e) {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     var tag = e.target && e.target.tagName;
-    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || tag === 'BUTTON' || tag === 'A') return;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    if ((tag === 'BUTTON' || tag === 'A') && keyFocus) return;
     if (document.querySelector('#modal-root > *')) return;
     var st = SS.state, k = e.key.toLowerCase(), dg = /^(?:Digit|Numpad)([123])$/.exec(e.code || '');
     if (dg) k = dg[1];                                   // AZERTY: the top-row digits give & é " without Shift
@@ -63,12 +68,12 @@
     if (k === 'm') {
       var on = !(st.settings.sfx || st.settings.music);
       SS.Sim.setSetting('sfx', on); SS.Sim.setSetting('music', on);
-      return;
-    }
-    if (st.phase !== 'day') return;
-    if (k === ' ' || k === 'p') { e.preventDefault(); SS.setPaused(!SS.paused); }
+    } else if (st.phase !== 'day') return;
+    else if (k === ' ' || k === 'p') SS.setPaused(!SS.paused);
     else if (k === '1' || k === '2' || k === '3') SS.Sim.setSetting('speed', Number(k));
     else if (k === 'b' && !SS.paused) SS.Sim.ringBell();
+    else return;
+    e.preventDefault();                                  // handled: Space must not also press the button clicked last
   }
 
   function boot() {
@@ -82,6 +87,8 @@
     var scene = document.getElementById('scene');
     scene.addEventListener('pointerdown', onScenePress);
     scene.addEventListener('pointermove', onSceneMove);
+    scene.addEventListener('contextmenu', function (e) { e.preventDefault(); });   // no "Save image as" menu over the street
+    document.addEventListener('focusin', onFocus);
     window.addEventListener('keydown', onKey);
     var unlock = function () { if (SS.Audio && SS.Audio.unlock) { try { SS.Audio.unlock(); } catch (e) { /* optional */ } } };
     window.addEventListener('pointerdown', unlock, { passive: true });

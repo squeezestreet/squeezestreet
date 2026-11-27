@@ -61,16 +61,19 @@
   function computeTarget() {
     var fw = Math.max(200, view.w - inset.left - inset.right);
     var fh = Math.max(180, view.h - inset.bottom);          // the sky may run under the HUD
-    // fit ~1000 world units across on wide screens, zoom in on tall ones, never tiny
-    var s = Math.max(fh / 820, Math.min(fw / 420, fh / 540));
+    // fit ~1000 world units across on wide screens, zoom in on tall ones (within reason), never tiny
+    var s = Math.max(fh / 820, Math.min(fw / 420, fh / 540)), tall = fh > fw;
     s = Math.max(s, view.w / 1700);
+    if (tall) s = Math.min(s, fw / (fw >= 700 ? 850 : 650));   // portrait: a street's worth of customers, not a close-up of the stand
     var viewW = fw / s;
     target.scale = s;
     target.camX = SS.lerp(W.STAND_X - 72, W.STAND_X, SS.clamp((viewW - 380) / 520, 0, 1));
+    // title: the stand sits in the left third, clear of the centred logo and menu (and pans in when the game starts)
+    if (env.phase === 'title') target.camX = W.STAND_X + fw / (3 * s);
     target.cx = inset.left + fw / 2;
-    // feet of the front lane sit a little above the free area's bottom edge
+    // feet of the front lane sit a little above the free area's bottom edge; in portrait the road fills the bottom, not sky the top
     var below = (W.SIDEWALK_H + 46) * s;
-    target.groundY = Math.round(Math.min(view.h - inset.bottom - below, view.h * 0.74));
+    target.groundY = Math.round(Math.min(view.h - inset.bottom - below, view.h * (tall ? 0.64 : 0.74)));
   }
 
   function updateView(dt) {

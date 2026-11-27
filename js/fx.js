@@ -756,6 +756,7 @@
     emit(R.tag, 1, q.x + 8, q.y);
   });
   on('milestone', function (p, V) {
+    if (SS.state && SS.state.phase === 'results') return; // #fx sits above the UI: confetti would bury the results card (its banner still shows)
     if (now() - lastMilestone < 400) return;              // several goals at once share one cannon volley
     lastMilestone = now();
     var pw = clamp(V.h / 720, 0.75, 1.35);
@@ -789,17 +790,14 @@
     if (!lowMo) act({ type: 'sun', z: 0, t: -d, max: 1.05, x: x, y: y, size: Math.min(V.w, V.h) * 1.2 });
     stamp('OPEN!', x, y, { color: '#ffd83d', size: stampSize(1), max: 1.05, delay: d, rot: -0.05, hit: lowMo ? 0 : 1 });
   });
-  on('day:end', function (p, V) {
-    var q = stage(), d = lowMo ? 0 : 0.2;
-    stamp('CLOSED', q.x, q.y, { color: '#ff6257', size: stampSize(0.9), slam: 1, rot: 0.06, max: 1.1, delay: d, hit: lowMo ? 0 : 3 });
-    emit(R.leaf, 14, V.w / 2, -16);
-  });
   on('weather:change', function (p) {
     if (p.type !== 'storm' || lowMo) return;
     flash('#ffffff', 0.8, 0.3);
     FX.shake(7, 0.7);
   });
   on('phase', function (p) {
+    // the results card opens at once and #fx draws above it: the day's stamps, coins and floaters go with the day (the wipe hides the cut)
+    if (p.to === 'results') { acts.length = 0; live = 0; }
     if (!seenPhase || p.from === null) { seenPhase = true; return; }     // boot: nothing to cover yet
     if (lowMo) return;
     for (var i = acts.length - 1; i >= 0; i--) if (acts[i].type === 'wipe') acts.splice(i, 1);
