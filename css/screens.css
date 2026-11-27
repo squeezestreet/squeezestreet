@@ -195,8 +195,8 @@
 /* folded sections (day-1 shopping and recipe, the results' day details): a row you can tap, with a chevron */
 .prep-more-sum, .res-more-sum { display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 8px 14px 8px 10px; list-style: none; cursor: pointer; font-weight: 700; line-height: 1.25; background: var(--paper); border: var(--line) solid var(--ink); border-radius: var(--r-md); box-shadow: var(--drop); }
 .prep-more-sum::-webkit-details-marker, .res-more-sum::-webkit-details-marker { display: none; }
-.prep-more-sum::after, .res-more-sum::after { content: ''; flex: 0 0 auto; width: 9px; height: 9px; margin: -4px 4px 0 auto; border-right: 3px solid var(--ink); border-bottom: 3px solid var(--ink); transform: rotate(45deg); transition: transform .2s var(--swift); }
-[open] > .prep-more-sum::after, [open] > .res-more-sum::after { margin-top: 4px; transform: rotate(-135deg); }
+.prep-more-sum::after, .res-more-sum::after { content: ''; flex: 0 0 auto; width: 16px; height: 16px; margin: 0 2px 0 auto; background: var(--ink); -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3 6l5 5 5-5' fill='none' stroke='black' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3 6l5 5 5-5' fill='none' stroke='black' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat; transition: transform .2s var(--swift); }
+[open] > .prep-more-sum::after, [open] > .res-more-sum::after { transform: rotate(180deg); }
 .prep-more-sum:focus-visible, .res-more-sum:focus-visible { outline: 3px solid var(--grape); outline-offset: 3px; }
 .prep-more-sum b { font-weight: 900; }
 .prep-more-ico { color: var(--good); }
