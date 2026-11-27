@@ -766,6 +766,34 @@ const rowOf = (id) => (SS.state.lastResult.regulars || []).find((r) => r.id === 
   ok(Sim.restock(10) === null, 'restock only in the morning');
 }
 
+/* The morning cart leaves an open truck its rent, Grandma's loan goes into it, and the first pitcher's flavor cost waits for the truck's rent */
+{
+  const morning = (cash, truck) => {
+    disk.clear(); Sim.newGame(9);
+    const st = SS.state;
+    st.day = 4; st.phase = 'results'; st.cash = cash; st.stock = { lemons: 0, sugar: 0, ice: 0, cups: 0 };
+    if (truck) st.truck = { at: 'maple', route: null, open: true, price: 2, daysAt: 0, visited: ['home', 'maple'], total: { days: 0, cups: 0, revenue: 0, costs: 0, profit: 0 } };
+    st.lastResult = { cups: 120, people: { soldout: 0, wait: 0, quit: 0 }, weather: { type: 'sunny', temp: 26 }, day: 4 };
+    Sim.nextDay();
+    return Sim.prepInfo();
+  };
+  let pi = morning(40, true);
+  ok(pi.canStart && !pi.truckShut && pi.truckRent === 20, 'the pre-filled cart leaves the truck its rent: ' + JSON.stringify(pi));
+  pi = morning(22, true);
+  ok(pi.canStart && pi.truckShut, 'when the rent would leave the stand nothing, the stand still gets a cart: ' + JSON.stringify(pi));
+  pi = morning(3, false);
+  ok(SS.state.cash > 3 && pi.canStart, 'a morning Grandma helps out opens with a cart that can start: ' + JSON.stringify([SS.state.cart, pi.reason]));
+
+  morning(500, true);
+  const st = SS.state, pink = D.byId(D.flavors, 'pink');
+  st.flavors.push(pink.id); st.flavor = pink.id;
+  ITEMS.forEach((it) => Sim.setCart(it, 2));
+  st.cash = r2(Sim.cartCost() + Sim.rent() + 20 + 0.3);
+  ok(!Sim.prepInfo().truckShut, 'prep says the truck opens');
+  Sim.startDay(); Sim.closeEarly();
+  ok(SS.state.lastResult.truck.status === 'trading', 'the first pitcher\'s flavor cost does not shut a truck prep said would open: ' + JSON.stringify(SS.state.lastResult.truck));
+}
+
 /* Frost Pack: no ice melts in the day, none spoils overnight */
 {
   for (const frost of [true, false]) {

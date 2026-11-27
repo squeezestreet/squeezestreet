@@ -537,9 +537,9 @@
     ITEMS.forEach(function (it) { c += (st.cart[it] || 0) * st.market[it]; });
     return r2(c);
   }
-  /** Shrink the cart until it fits the budget (cash after rent). -> true when it changed */
-  function trimCart(st) {
-    var budget = st.cash - rent(), changed = false, guard = 0;
+  /** Shrink the cart until it fits the budget (cash after rent, less `keep`). -> true when it changed */
+  function trimCart(st, keep) {
+    var budget = st.cash - rent() - (keep || 0), changed = false, guard = 0;
     while (cartCost() > budget + 1e-9 && guard++ < 1000) {
       var big = null;
       ITEMS.forEach(function (it) { if (st.cart[it] > 0 && (!big || st.cart[it] > st.cart[big])) big = it; });
@@ -549,22 +549,27 @@
     return changed;
   }
   /** Cheapest cart that, on top of the pantry, makes `cups` cups with the current recipe; the order shrinks until it fits the budget. */
-  function fillCart(st, cups) {
+  function fillCart(st, cups, keep) {
     var saved = clamp(upVal('cooler'), 0, 1), r = st.recipe;
     for (var want = Math.max(1, Math.ceil(fin(cups, 0))); ; want = Math.floor(want * 0.85)) {
       var need = { lemons: want * r.lemons / 10, sugar: want * r.sugar / 10, ice: want * r.ice * (1 + 0.45 * (1 - saved)), cups: want }, cost = 0;   // ice melts as the day goes
       ITEMS.forEach(function (it) { st.cart[it] = Math.min(TUNE.maxPacks, Math.max(0, Math.ceil((need[it] - st.stock[it]) / D.items[it].pack))); cost += st.cart[it] * st.market[it]; });
-      if (cost <= st.cash - rent() + 1e-9 || want < 5) break;
+      if (cost <= st.cash - rent() - (keep || 0) + 1e-9 || want < 5) break;
     }
-    trimCart(st);
+    trimCart(st, keep);
   }
-  /** What the morning cart starts as: two packs of each on day 1, then about what yesterday's crowd wanted, scaled to today's forecast. */
+  /** What the morning cart starts as: two packs of each on day 1, then about what yesterday's crowd wanted, scaled to today's forecast.
+   *  It leaves the rent of a truck the player has open in a town, unless the stand could then not open at all. */
   function prefillCart(st) {
-    var lr = st.lastResult;
-    if (!lr || !lr.people || !lr.weather) { ITEMS.forEach(function (it) { st.cart[it] = 2; }); trimCart(st); return; }
-    var pull = function (id) { var w = D.weather[id] || D.weather.sunny; return w.traffic * w.thirst; };
-    var wanted = (lr.cups + lr.people.soldout + 0.5 * (lr.people.wait + lr.people.quit)) * 1.2 * clamp(pull(st.forecast.type) / pull(lr.weather.type), 0.45, 2.2);
-    fillCart(st, Math.max(12, wanted));                 // a washed-out yesterday still leaves a sensible order for a sunny today
+    var lr = st.lastResult, keep = truckRentDue(st), wanted = 0;
+    if (lr && lr.people && lr.weather) {
+      var pull = function (id) { var w = D.weather[id] || D.weather.sunny; return w.traffic * w.thirst; };
+      wanted = Math.max(12, (lr.cups + lr.people.soldout + 0.5 * (lr.people.wait + lr.people.quit)) * 1.2 *
+        clamp(pull(st.forecast.type) / pull(lr.weather.type), 0.45, 2.2));   // a washed-out yesterday still leaves a sensible order for a sunny today
+    }
+    function fill(k) { if (wanted) fillCart(st, wanted, k); else { ITEMS.forEach(function (it) { st.cart[it] = 2; }); trimCart(st, k); } }
+    fill(keep);
+    if (keep && cupsFrom(st, stockAfter(st)).cups < 1) fill(0);
   }
   /** Player / bot helper: fill the cart for `cups` cups. -> the cart */
   function restock(cups) {
@@ -601,7 +606,9 @@
     st.phase = 'prep';
     emit('phase', { from: from, to: 'prep' });
     if (st.event) emit('event:trigger', { id: st.event.id, title: st.event.title, desc: st.event.desc, icon: st.event.icon });
+    var cash0 = st.cash;
     grandma(st);
+    if (st.cash > cash0) { prefillCart(st); emit('cart', {}); }    // Grandma's money goes into the cart too, so the stand can open
     persist(true);
   }
 
@@ -655,10 +662,15 @@
     var st = SS.state;
     if (!st || !st.market) return { cost: 0, cashAfter: 0, rent: 0, stockAfter: zeros(), maxCups: 0, limiting: 'lemons', costPerCup: 0, canStart: false, reason: 'Start a game first.' };
     var cost = cartCost(), after = stockAfter(st), can = cupsFrom(st, after);
-    var ok = canStartDay(), T = st.truck, c = T && !T.route && T.open ? cityDef(T.at) : null, truckRent = c && c.traffic > 0 ? c.rent : 0;
+    var ok = canStartDay(), T = st.truck, c = T && !T.route && T.open ? cityDef(T.at) : null, truckRent = truckRentDue(st);
     var left = r2(st.cash - cost - rent()), truckShut = truckRent > 0 && left + 1e-9 < truckRent;   // truckStart pays it after the cart and the stand's rent
     return { cost: cost, cashAfter: truckShut ? left : r2(left - truckRent), rent: rent(), stockAfter: after, maxCups: can.cups, limiting: can.limiting,
       costPerCup: r2(cupCost(st)), canStart: ok.ok, reason: ok.reason, truckRent: truckRent, truckShut: truckShut, truckCity: c ? c.name : '' };
+  }
+  /** The rent truckStart takes today: the truck is parked, open, in a town that trades. */
+  function truckRentDue(st) {
+    var T = st.truck, c = T && !T.route && T.open ? cityDef(T.at) : null;
+    return c && c.traffic > 0 ? c.rent : 0;
   }
   /** What one cup costs at today's market prices with the current recipe and flavor. */
   function cupCost(st) {
@@ -751,11 +763,12 @@
     st.phase = 'day';
     if (cost + rentPaid > 0) emit('cash', { amount: st.cash, delta: -r2(cost + rentPaid), reason: 'supplies' });
     emit('phase', { from: 'prep', to: 'day' });
-    // the first batch was mixed while setting up, so the stand opens with a full pitcher (canStartDay made sure there is a cup's worth)
-    startBrew();
-    if (st.today.pitcher.brew != null) { st.today.pitcher.cups = rt.batch; st.today.pitcher.brew = null; emit('brew:done', { cups: rt.batch }); }
     emit('day:start', { day: st.day, weather: st.weather, event: st.event });
     rt.truck = truckStart(st);
+    // the first batch was mixed while setting up, so the stand opens with a full pitcher (canStartDay made sure there is a cup's worth);
+    // its flavor cost comes after the truck's rent, which prep promised without it
+    startBrew();
+    if (st.today.pitcher.brew != null) { st.today.pitcher.cups = rt.batch; st.today.pitcher.brew = null; emit('brew:done', { cups: rt.batch }); }
     st.boosts.forEach(function (id) { emit('boost:on', { id: id }); });
     // a few people are already out and about, so the street is not empty at opening time
     var n = Math.min(14, Math.round(spawnRate(st, st.today) * 7));
