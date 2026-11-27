@@ -317,9 +317,11 @@
     bar.goal.hidden = !m;
     bar.panel.classList.toggle('has-goal', !!m);
     if (!m) return;
-    var cur = m.kind === 'dayProfit' || m.kind === 'lifetime' ? SS.CURRENCY : '';
+    // a count shows when it means something now: best-day profit only moves at closing, and a yes/no goal ('Fresh air') needs its how
+    if (p.target <= 1 || m.kind === 'dayProfit') { put(bar.goalText, 'Next: ' + String(m.desc || m.title).replace(/\.$/, '')); return; }
+    var cur = m.kind === 'lifetime' ? SS.CURRENCY : '';
     var f = function (v) { return m.kind === 'rep' ? stars1(v) : cur + SS.fmtInt(Math.floor(Math.max(0, v))); };
-    put(bar.goalText, 'Next: ' + m.title + (p.target > 1 ? ' ' + f(p.value) + '/' + f(p.target) : ''));
+    put(bar.goalText, 'Next: ' + m.title + ' ' + f(p.value) + '/' + f(p.target));
   }
 
   function onBell() {
@@ -421,8 +423,8 @@
       bar.sold.el.style.color = fl ? fl.color : '';
     }
 
-    // a rainy or stormy day can be cut short once it is well under way and nobody is waiting
-    var wx = s.weather && s.weather.type, wet = (wx === 'rainy' || wx === 'storm') && t > 0.4 && !(td.queue && td.queue.length);
+    // a rainy or stormy day can be cut short once it is well under way and nobody is waiting (not at t = 1: it is closing already)
+    var wx = s.weather && s.weather.type, wet = (wx === 'rainy' || wx === 'storm') && t > 0.4 && t < 1 && !(td.queue && td.queue.length);
     var out = td.soldOut || (wet ? wx : ''), mode = td.soldOut ? 2 : wet ? 3 : brewing && dv.brewLong ? 1 : 0;
     if (dv.fm !== mode || dv.out !== out) setFloat(mode, out);
   }

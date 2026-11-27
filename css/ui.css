@@ -303,6 +303,17 @@
   .daybar-speed { order: 4; }
   .daybar-pause { order: 5; }
 }
+/* That one HUD row leaves the strip little room (less again with Dex's button): the stand can't move mid-day, so its name gives way to the clock */
+@media (max-height: 420px) and (orientation: landscape) and (max-width: 899px) {
+  #hud.is-day .hud-loc { display: none; }
+  #hud.is-day .hud-wx { margin-left: 0; }
+  .hud-clock-track { min-width: 0; }
+}
+/* The narrowest ones with Dex in town: room for the time track only (the street shows the weather) */
+@media (max-height: 420px) and (orientation: landscape) and (max-width: 600px) {
+  #hud.has-deals .hud-ctx, #hud.has-deals .hud-clock-text { display: none; }
+  #hud.has-deals .hud-clock { padding-left: 6px; }
+}
 
 /* ====================================================================== *
  * Pause card
