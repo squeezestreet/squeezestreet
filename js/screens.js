@@ -374,7 +374,8 @@
     prep.go.disabled = !info.canStart;
     // an empty cart is where every morning starts, not a mistake: a calm nudge. Red is kept for an Open press that fails.
     // "none" only when stock is the one thing missing: short on rent or an over-budget cart keeps the sim's own words (e.g. "set up on Maple Street")
-    var ok = !!info.canStart, none = !ok && info.maxCups < 1 && info.cashAfter > -0.005, why = info.reason || 'Not ready yet.', ly = st.lastResult;
+    var why = info.reason || 'Not ready yet.', ly = st.lastResult;
+    var ok = !!info.canStart, none = !ok && info.maxCups < 1 && info.cashAfter > -0.005 && why.indexOf('it is free') < 0;   // broke after rent: the sim names the free spot
     var want = ok && ly && ly.day === st.day - 1 ? Math.round(num(ly.cups) + num(ly.people && ly.people.soldout)) : 0;   // yesterday's cups plus sold-out turn-aways
     // judged against today's forecast and spot, so a stormy morning after a sunny day never asks for more stock
     var k = want > 0 ? Math.min(1, pull((st.forecast || {}).type, st.location) / pull(ly.weather && ly.weather.type, ly.location)) : 0;
