@@ -43,7 +43,7 @@
     { body: '#4cc3f0', trim: '#ffffff', top: '#2487d1', text: INK },
     { body: '#ff6257', trim: '#ffd83d', top: '#d83a30', text: '#ffffff' }
   ];
-  var looks = new Map(), tapT = 0, bellT = 0, cheerT = 0;
+  var looks = new Map(), tapT = 0, pokeT = 0, bellT = 0, cheerT = 0;   // pokeT: a tap with nothing to squeeze still gets a small squish
   // Dex the Dealer: his colours, the glow of each boost bottle, and what he is up to
   var DEX = { skin: '#d9a273', hair: '#2a1f4d', blazer: '#6c3fd6', lapel: '#46289a', pants: '#2b2a4a', gold: '#ffd83d', square: '#ffe14d', trunk: '#b4562e', drawer: '#96421f', velvet: '#2c1e46' };
   var EMPTY = [], dex = { on: false, offers: EMPTY, cols: [], sold: false, lim: false, edge: 1e9, hudL: 1e9, hudB: -1e9, at: -1e9 };
@@ -436,6 +436,24 @@
     }
     if (c.kind === 'vip') star(ctx, 0, -top - 14 + Math.sin(env.t * 4) * 2, 7, '#ffd83d');
     ctx.restore();
+  }
+
+  /* A passer-by in front of the stand fades to about half, so the sign and the line stay readable. The figure is drawn whole on a
+     scratch canvas and laid down at once: alpha on each part would show the arms and legs through one another. */
+  var ghost = null;
+  function drawFront(ctx, view, env, c, col) {
+    var a = c.state === 'walk' || c.state === 'leave' ? 0.55 + 0.45 * SS.clamp((Math.abs(c.x - W.STAND_X) - 100) / 40, 0, 1) : 1;
+    if (a >= 1 || !ctx.getTransform) { drawCustomer(ctx, view, env, c, col); return; }
+    var cv = ctx.canvas, m = ctx.getTransform(), s = view.laneScale(c.lane), x = view.toX(c.x), y = view.laneY(c.lane);
+    var l = Math.max(0, Math.floor(m.a * (x - 70 * s) + m.e)), t = Math.max(0, Math.floor(m.d * (y - 200 * s) + m.f));
+    var w = Math.min(cv.width, Math.ceil(m.a * (x + 70 * s) + m.e)) - l, h = Math.min(cv.height, Math.ceil(m.d * (y + 16 * s) + m.f)) - t;
+    if (w <= 0 || h <= 0) return;
+    if (!ghost) ghost = document.createElement('canvas').getContext('2d');
+    if (ghost.canvas.width !== cv.width || ghost.canvas.height !== cv.height) { ghost.canvas.width = cv.width; ghost.canvas.height = cv.height; }
+    ghost.save(); ghost.setTransform(1, 0, 0, 1, 0, 0); ghost.clearRect(l, t, w, h);
+    ghost.beginPath(); ghost.rect(l, t, w, h); ghost.clip();      // nothing lands outside the box, so the next one starts clean
+    ghost.setTransform(m); drawCustomer(ghost, view, env, c, col); ghost.restore();
+    ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = a; ctx.drawImage(ghost.canvas, l, t, w, h, l, t, w, h); ctx.restore();
   }
 
   /* Everything that floats over a head, drawn after all the bodies so nobody walks over it.
@@ -1212,7 +1230,7 @@
      him, and the cooler tucks in at the front when he stands close. */
   function drawStand(ctx, view, env, st, dl) {
     var s = view.laneScale(W.STAND_LANE), x = view.toX(W.STAND_X), y = view.laneY(W.STAND_LANE);
-    var squash = tapT > 0 ? Math.sin(tapT / 0.22 * Math.PI) * 0.06 : 0;
+    var squash = tapT > 0 ? Math.sin(tapT / 0.22 * Math.PI) * 0.06 : pokeT > 0 ? Math.sin(pokeT / 0.12 * Math.PI) * 0.03 : 0;
     shadow(ctx, x, y + 2 * s, 120, s);
     ctx.save(); ctx.translate(x, y); ctx.scale(s * (1 + squash), s * (1 - squash));
     standRig(ctx, env, st, standLook(st), dl, (view.x1 - W.STAND_X) * view.scale / s, st && st.today, true);
@@ -1889,7 +1907,7 @@
   SS.Actors = {
     drawPerson: person,                                     // (ctx, look, opts) -> head-top height; look and opts are documented above person()
     update: function (dt, view, env) {
-      tapT = Math.max(0, tapT - dt); bellT = Math.max(0, bellT - dt); cheerT = Math.max(0, cheerT - dt);
+      tapT = Math.max(0, tapT - dt); pokeT = Math.max(0, pokeT - dt); bellT = Math.max(0, bellT - dt); cheerT = Math.max(0, cheerT - dt);
       dealT = Math.max(0, dealT - dt); lookT = Math.max(0, lookT - dt); lookCD -= dt;
       for (var id in glowT) if (glowT[id] > 0) glowT[id] = Math.max(0, glowT[id] - dt);
       if (view && view.toX && env) showStep(dt, view, env);
@@ -1904,7 +1922,7 @@
       drawStand(ctx, view, env, st, dl);
       for (; i < n && list[i].lane < W.DEALER_LANE; i++) drawCustomer(ctx, view, env, list[i], fl.color);
       if (on) drawDealer(ctx, view, env, st);
-      for (; i < n; i++) drawCustomer(ctx, view, env, list[i], fl.color);
+      for (; i < n; i++) drawFront(ctx, view, env, list[i], fl.color);
       if (today && today.tips && today.tips.length) drawTips(ctx, view, env, today.tips);
       lineMarks(view, list, today, st);
       for (i = 0; i < n; i++) drawOverhead(ctx, view, env, list[i], st, today);
@@ -1939,6 +1957,8 @@
     },
     /** true once Dex is set up today (after 'dealer:setup' 'ready'); false while he is away or mid-show */
     dealerReady: function () { return show.mode === SET && dexOn(SS.state); },
+    /** main.js: a tap on the stand that the sim turned down (nothing to squeeze yet, or too soon after the last) */
+    poke: function () { pokeT = 0.12; },
     /** the customise screen's live preview of the stand with a given look (never touches the scene) */
     drawStandPreview: drawStandPreview,
     /** debug.js: play his entrance ('arrive') or his exit ('leave') right now */

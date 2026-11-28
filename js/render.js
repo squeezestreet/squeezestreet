@@ -22,7 +22,7 @@
   });
   var NIGHT_SPAN = 1.6;                    // dayT wraps here
   var target = { scale: 1, camX: W.STAND_X, groundY: 0, cx: 0 }, snapped = false;
-  var inset = { top: 0, right: 0, bottom: 0, left: 0 }, insetAt = -1;
+  var inset = { top: 0, right: 0, bottom: 0, left: 0, pill: 1e9 }, insetAt = -1;   // pill: y of the day bar's hint pill top
   var warned = {};
 
   function safe(name, fn) {
@@ -42,7 +42,7 @@
 
   /* How much of the canvas the UI covers, so the stand stays in the free area. */
   function measureInsets() {
-    var top = 0, right = 0, bottom = 0;
+    var top = 0, right = 0, bottom = 0, pill = 1e9;
     var hud = document.getElementById('hud');
     if (hud && !hud.hidden) top = hud.getBoundingClientRect().bottom + 6;
     var sheet = document.getElementById('sheet');
@@ -54,7 +54,12 @@
       }
     }
     var bar = document.getElementById('daybar');
-    if (bar && !bar.hidden) bottom = Math.max(bottom, view.h - bar.getBoundingClientRect().top + 4);
+    if (bar && !bar.hidden) {
+      var bt = bar.getBoundingClientRect().top;
+      bottom = Math.max(bottom, view.h - bt + 4);
+      pill = bt - 56;                                     // the hint pill floats up to 56px above the bar; kept free while hidden too, so the street does not bob
+    }
+    inset.pill = pill;
     inset.top = top; inset.right = right; inset.bottom = Math.min(bottom, view.h * 0.7); inset.left = 0;
   }
 
@@ -68,12 +73,14 @@
     var viewW = fw / s;
     target.scale = s;
     target.camX = SS.lerp(W.STAND_X - 72, W.STAND_X, SS.clamp((viewW - 380) / 520, 0, 1));
-    // title: the stand sits in the left third, clear of the centred logo and menu (and pans in when the game starts)
-    if (env.phase === 'title') target.camX = W.STAND_X + fw / (3 * s);
+    // title: the stand sits in the left third, clear of the centred logo and menu (and pans in when the game starts);
+    // an upright phone has no room beside the copy, so there it waits just off the left edge
+    if (env.phase === 'title') target.camX = W.STAND_X + (tall && fw < 700 ? fw / (2 * s) + 200 : fw / (3 * s));
     target.cx = inset.left + fw / 2;
     // feet of the front lane sit a little above the free area's bottom edge; in portrait the road fills the bottom, not sky the top
     var below = (W.SIDEWALK_H + 46) * s;
-    target.groundY = Math.round(Math.min(view.h - inset.bottom - below, view.h * (tall ? 0.64 : 0.74)));
+    // and the front lane's feet stay above the day bar's hint pill
+    target.groundY = Math.round(Math.min(view.h - inset.bottom - below, inset.pill - (W.SIDEWALK_H + 12) * s, view.h * (tall ? 0.64 : 0.74)));
   }
 
   function updateView(dt) {

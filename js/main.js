@@ -45,7 +45,10 @@
     if (hit.type === 'dealer') { if (SS.Screens && SS.Screens.open) SS.Screens.open('dealer'); }
     else if (st.phase !== 'day') return;
     else if (hit.type === 'tip') SS.Sim.collectTip(hit.id);
-    else if (hit.type === 'stand') SS.Sim.tapStand();
+    else if (hit.type === 'stand' && !SS.Sim.tapStand()) {   // nothing to squeeze: a softer squish, so a tap is never silent
+      if (SS.Actors.poke) SS.Actors.poke();
+      SS.sfx('squish', { gain: 0.4, pitch: 0.75 });
+    }
   }
   function onSceneMove(e) {
     var st = SS.state, hit = sceneLive(st) ? hitAt(e) : null;

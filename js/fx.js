@@ -803,6 +803,11 @@
     for (var i = acts.length - 1; i >= 0; i--) if (acts[i].type === 'wipe') acts.splice(i, 1);
     act({ type: 'wipe', z: 2, t: 0, max: 0.38, dir: (wipeDir = -wipeDir) });
   });
+  // #fx sits above the pause card and every modal, and holds its last frame while paused: hide it until the game runs again
+  if (SS.on) SS.on('pause', function (p) {
+    fxEl = fxEl || (typeof document !== 'undefined' && document.getElementById('fx'));
+    if (fxEl) fxEl.style.visibility = p && p.paused ? 'hidden' : '';
+  });
   on('cash', function (p) {
     if (!(p.delta < 0)) return;
     var q = aim(null, 'hud-cash');
