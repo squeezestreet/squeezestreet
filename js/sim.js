@@ -522,9 +522,10 @@
   }
   /** Fuel paid for a trip that has not left yet: it comes back if the plan is cancelled. */
   function fuelBack(st) { var R = st.truck && st.truck.route; return R && R.left >= R.total ? fin(R.fuel, 0) : 0; }
-  function grandma(st) {
+  /** At dawn she covers the rent too; after a purchase or a move that would pay out the rent again and again. */
+  function grandma(st, dawn) {
     if (st.phase !== 'prep' || !st.market) return;
-    var need = loanNeed(st), have = st.cash - rent() + fuelBack(st);       // planned fuel still counts as yours, so cancelling a trip is no gift
+    var need = loanNeed(st), have = st.cash - (dawn ? rent() : 0) + fuelBack(st);       // planned fuel still counts as yours, so cancelling a trip is no gift
     if (need <= 0 || have >= need) return;
     var loan = Math.ceil(need - have) + 2;
     st.cash = r2(st.cash + loan);
@@ -628,7 +629,7 @@
     emit('phase', { from: from, to: 'prep' });
     if (st.event) emit('event:trigger', { id: st.event.id, title: st.event.title, desc: st.event.desc, icon: st.event.icon });
     var cash0 = st.cash;
-    grandma(st);
+    grandma(st, true);
     if (st.cash > cash0) { prefillCart(st); emit('cart', {}); }    // Grandma's money goes into the cart too, so the stand can open
     persist(true);
   }
@@ -1774,7 +1775,7 @@
       var why = boostUseless(o.id, st);
       if (why) return why;
     } else if (st.flavors.indexOf(o.id) >= 0) return 'You already have ' + flavorDef(o.id).name + '.';
-    var cost = dealCost(st, o), keep = st.phase === 'prep' && loanNeed(st) > 0 ? loanNeed(st) + rent() : 0;   // what Grandma would otherwise make up
+    var cost = dealCost(st, o), keep = st.phase === 'prep' && loanNeed(st) > 0 ? loanNeed(st) + rent() : 0;   // so a deal never eats the money for supplies and rent
     if (st.cash + 1e-9 < cost) return 'You need ' + money(cost - st.cash) + ' more for that.';
     return st.cash - cost + 1e-9 < keep ? 'Keep ' + money(keep) + ' for supplies' + (rent() > 0 ? ' and rent' : '') + ' first. You would have ' + money(st.cash - cost) + ' left.' : '';
   }
@@ -2146,7 +2147,7 @@
       if (st.phase === 'prep') st.weather = { type: m.forecast.type, temp: m.forecast.temp };
     }
     if (st.phase === 'prep') {
-      if (!(raw.v >= 2) && cartCost() === 0) { var cash0 = st.cash; prefillCart(st); grandma(st); if (st.cash > cash0) prefillCart(st); }    // a morning saved before the filled cart gets one; a newer empty cart was the player's choice
+      if (!(raw.v >= 2) && cartCost() === 0) { var cash0 = st.cash; prefillCart(st); grandma(st, true); if (st.cash > cash0) prefillCart(st); }    // a morning saved before the filled cart gets one; a newer empty cart was the player's choice
       trimCart(st); rollDealer(st);       // older saves have no dealer yet
     }
     emit('phase', { from: from, to: st.phase });

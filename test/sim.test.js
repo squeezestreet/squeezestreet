@@ -847,6 +847,9 @@ const rowOf = (id) => (SS.state.lastResult.regulars || []).find((r) => r.id === 
   pi = Sim.prepInfo();
   ok(!pi.canStart && /Maple Street today, it is free/.test(pi.reason), 'rent leaves too little for a cup: prep says where it is free: ' + pi.reason);
   ok(Sim.setLocation('street').ok && Sim.prepInfo().canStart, 'moving to Maple Street refills the cart so the stand can open: ' + JSON.stringify([st.cart, st.cash, Sim.prepInfo().reason]));
+  const cash1 = st.cash;
+  Sim.setLocation('park'); Sim.setLocation('street');
+  ok(st.cash === cash1, 'Grandma pays the rent only at dawn, so moving to a spot with rent and back is no free money: ' + cash1 + ' -> ' + st.cash);
 }
 
 /* A morning saved before the filled cart (v1, empty cart) gets one on Continue, with Grandma's help when broke; a newer save keeps an empty cart as it was */
