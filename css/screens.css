@@ -28,7 +28,7 @@
  * ====================================================================== */
 .prep { container: prep / inline-size; display: flex; flex-direction: column; gap: var(--s4); }
 .prep-cols { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s4); align-items: start; }
-.prep-col { display: flex; flex-direction: column; gap: var(--s4); min-width: 0; }
+.prep-col { container: prep-col / inline-size; display: flex; flex-direction: column; gap: var(--s4); min-width: 0; }
 @container prep (min-width: 660px) { .prep-cols { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--s5); } }
 .prep-in { animation: ss-rise .45s var(--swift) both; animation-delay: calc(var(--i, 0) * 55ms); }
 
@@ -80,7 +80,7 @@
 .prep-item-ico { position: absolute; left: 0; top: 50%; display: grid; place-items: center; transform: translateY(-50%); transition: transform .25s var(--spring); }
 .prep-item-ico .ico { width: 40px; height: 40px; }
 .prep-item.is-in-cart .prep-item-ico { transform: translateY(-50%) rotate(-8deg) scale(1.08); }
-@container prep (max-width: 400px) {
+@container prep-col (max-width: 400px) {
   .prep-item { padding-left: 0; gap: var(--s2); }
   .prep-item-ico, .prep-item.is-in-cart .prep-item-ico { position: static; transform: none; }
   .prep-item-ico .ico { width: 26px; height: 26px; }
@@ -115,7 +115,7 @@
 .prep-rec-ico .ico { display: block; width: 28px; height: 28px; }
 .prep-rec-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.15; }
 .prep-rec-per { font-size: var(--fs-xs); color: var(--ink-soft); }
-@container prep (max-width: 400px) {
+@container prep-col (max-width: 400px) {
   .prep-rec-row { grid-template-columns: minmax(0, 1fr) auto; }
   .prep-rec-ico { display: none; }
   .prep-glass { width: 78px; }

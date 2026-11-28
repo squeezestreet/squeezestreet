@@ -75,6 +75,8 @@
     sheet.dataset.mode = mode;
     sheet.hidden = false;
     body.scrollTop = 0;
+    // a results-reveal smooth scroll still running on the compositor hands its progress back on the next frame
+    requestAnimationFrame(function () { body.scrollTop = 0; });
     if (was) restart(sheet, mode === 'center' ? 'res-sheet-in' : 'prep-sheet-in');
   }
   function hideSheet() {
