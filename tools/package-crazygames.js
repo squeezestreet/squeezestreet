@@ -38,7 +38,7 @@ if (/(src|href)="(\/|[a-z]+:)|https?:\/\//i.test(html)) fail('index.html has an 
 if (list.some((f) => /debug\.js|\.DS_Store|^(tools|test|brand|dist|\.git)\//.test(f))) fail('unwanted file in zip');
 const refs = [...html.matchAll(/(?:src|href)="([^"]+)"/g)].map((m) => m[1]);
 for (const css of list.filter((f) => f.endsWith('.css')))
-  for (const m of unz(css).matchAll(/url\((?!#|data:)['"]?([^)'"]+)/g)) refs.push(path.posix.join(path.posix.dirname(css), m[1]));
+  for (const m of unz(css).matchAll(/url\(['"]?(?!#|data:)([^)'"]+)/g)) refs.push(path.posix.join(path.posix.dirname(css), m[1]));
 const missing = refs.filter((r) => !list.includes(r));
 if (missing.length) fail('referenced but not in zip: ' + missing.join(', '));
 
