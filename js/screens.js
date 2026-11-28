@@ -74,10 +74,13 @@
     var was = sheet.hidden || sheet.dataset.mode !== mode;
     sheet.dataset.mode = mode;
     sheet.hidden = false;
+    toTop();
+    if (was) restart(sheet, mode === 'center' ? 'res-sheet-in' : 'prep-sheet-in');
+  }
+  function toTop() {
     body.scrollTop = 0;
     // a results-reveal smooth scroll still running on the compositor hands its progress back on the next frame
     requestAnimationFrame(function () { body.scrollTop = 0; });
-    if (was) restart(sheet, mode === 'center' ? 'res-sheet-in' : 'prep-sheet-in');
   }
   function hideSheet() {
     stopReveal();
@@ -509,7 +512,7 @@
     // every step again, instantly: steps are idempotent, and this snaps counters that were still ticking
     res.steps.forEach(function (s) { s.ran = true; safe('results reveal', function () { s.fn(true); }); });
     revealDone();
-    body.scrollTop = 0;                                     // land on "Day N done" and the profit, not where the reveal had scrolled
+    toTop();                                                // land on "Day N done" and the profit, not where the reveal had scrolled
   }
   function playReveal() {
     if (SS.reduced()) { finishReveal(); return; }
