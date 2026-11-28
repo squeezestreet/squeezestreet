@@ -916,11 +916,12 @@
     var el = document.querySelector('[data-tut="' + name + '"]');
     return el && el.getClientRects().length ? el : null;
   }
-  /** a batch mixing for the stand tip, a coin on the ground for the coin tip */
+  /** a batch mixing for the stand tip, a fresh coin on the ground for the coin tip (not one about to blink out after another
+   *  tip, nor under a banner: the first coin often lands under the 4 s First sale one, which on a short screen hides the tip) */
   function tutReady(at) {
-    var td = SS.state && SS.state.today;
+    var td = SS.state && SS.state.today, tips = td && td.tips;
     if (at === 'stand') return !!(td && td.pitcher && td.pitcher.brew != null);
-    if (at === 'coin') return !!(td && td.tips && td.tips.length);
+    if (at === 'coin') return !!(tips && tips.length && tips[tips.length - 1].ttl > 4) && !R.banner.firstElementChild;
     return true;
   }
   function tutNext() { tutMarkOnce(); coach.i++; coach.tries = 0; tutStep(); }
@@ -997,9 +998,9 @@
       l = r.left - o.left; t = top - o.top; w = r.width; ht = bot - top;
       if (f) { f = f.getBoundingClientRect(); bar = { l: f.left - o.left, t: f.top - o.top - lift, w: f.width, h: f.height + lift }; }
     }
-    if (!coach.bw) { coach.bw = coach.el.offsetWidth; coach.bh = coach.el.offsetHeight; }
+    if (!coach.bw) { coach.el.hidden = false; coach.bw = coach.el.offsetWidth; coach.bh = coach.el.offsetHeight; }     // a stepped-out bubble has no size
     var bw = coach.bw, bh = coach.bh, gap = 18, m = 8, top0 = R.hud.hidden ? m : W <= 520 ? 76 : 66;
-    var side, x, y, cy = t + Math.min(ht / 2, 70), step = coach.steps && coach.steps[coach.i];
+    var side, x, y, cy = t + Math.min(ht / 2, 70), step = coach.steps && coach.steps[coach.i], covered = false;
     // an anchor in a bottom action bar: keep the whole bar clear (its other buttons and the reason line)
     var k = bar || { l: l, t: t, w: w, h: ht };
     // a tip over the running street goes above its anchor when it can, clear of the stand and the queue beside it
@@ -1022,8 +1023,12 @@
       if (side === 'over' && step && step.act && R.banner.firstElementChild && SS.view) {
         var under = R.banner.getBoundingClientRect().bottom - R.coach.getBoundingClientRect().top + 8;
         if (under + bh <= SS.view.laneY(SS.W.STAND_LANE) - 150 * SS.view.scale) y = Math.max(y, under);
+        else covered = true;
       }
     }
+    // no room under it (short screens): the bubble steps out while the banner is up (the ring stays), and gets its full time after
+    if (covered && step.ms) { clearTimeout(coach.timer); coach.timer = setTimeout(tutNext, step.ms); }
+    if (coach.el.hidden !== covered) coach.el.hidden = covered;
     x = Math.round(x); y = Math.round(y); l = Math.round(l); t = Math.round(t); w = Math.round(w); ht = Math.round(ht);
     var ax = Math.round(clamp(l + w / 2 - x, 22, bw - 22)), ay = Math.round(clamp(cy - y, 22, bh - 22));
     if (side !== coach.side || x !== coach.x || y !== coach.y || ax !== coach.ax || ay !== coach.ay) {
@@ -1200,7 +1205,8 @@
     SS.on('brew:done', function () { if (coach.el && tutOn('stand')) tutNext(); });       // mixed: nothing left to squeeze
     SS.on('tip:collect', function (p) { if (tutOn('coin') && !(p && p.auto)) tutNext(); });
     ['brew:start', 'tip:drop'].forEach(function (e) {             // a stand or coin tip waiting for this can show now
-      SS.on(e, function () { if (phase === 'day' && coach.steps && !coach.el) tutStep(); });
+      // (only those: the opening brew:start would cut the bell tip's lead-in short)
+      SS.on(e, function () { if (phase === 'day' && !coach.el && (tutOn('stand') || tutOn('coin'))) tutStep(); });
     });
     SS.on('sale', refreshGoal);
 
