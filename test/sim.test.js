@@ -794,6 +794,77 @@ const rowOf = (id) => (SS.state.lastResult.regulars || []).find((r) => r.id === 
   ok(SS.state.lastResult.truck.status === 'trading', 'the first pitcher\'s flavor cost does not shut a truck prep said would open: ' + JSON.stringify(SS.state.lastResult.truck));
 }
 
+/* Trust the cart: a player who opens every day with the morning cart as it comes, at the starting price, and never changes the recipe.
+ * A wet day, even one closed early, must not leave the next dry day short; the tip explains price walkaways and does not nag. */
+{
+  let outAt = null;
+  const onOut = SS.on('soldout', () => { if (outAt === null) outAt = SS.state.today.t; });
+  const wet = (w) => w === 'rainy' || w === 'storm', quiet = [], nags = [];
+  for (const closeWet of [false, true]) {
+    const after = { days: 0, out: 0, t: 0 }, other = { days: 0, out: 0, t: 0 };
+    for (const seed of [1, 2, 3, 4, 5, 6, 7, 8, 11, 2024]) {
+      disk.clear(); Sim.newGame(seed);
+      let prevWx = null, prevAdvice = null;
+      for (let d = 1; d <= 30; d++) {
+        if (!ok(Sim.startDay().ok, 'trust the cart ' + seed + '/' + d + ': the morning cart should open: ' + Sim.canStartDay().reason)) break;
+        const wx = SS.state.weather.type;
+        outAt = null;
+        for (let i = 0; i < 20000 && SS.state.phase === 'day'; i++) {
+          Sim.update(1 / 30);
+          const td = SS.state.today;
+          if (closeWet && td && wet(wx) && td.t > 0.45 && !td.queue.length) Sim.closeEarly();
+        }
+        const r = SS.state.lastResult, p = r.people;
+        if (d > 1 && (wx === 'sunny' || wx === 'heatwave')) { const a = wet(prevWx) ? after : other; a.days++; a.t += outAt === null ? 1 : outAt; if (outAt !== null) a.out++; }
+        if (r.topFeedback === 'great' && p.pricey > 0 && p.pricey >= 0.2 * (p.served + p.pricey) && !/walked away|ran out/.test(r.advice)) quiet.push(seed + '/' + d + ': ' + r.advice);
+        if (/to make it perfect/.test(r.advice) && r.advice === prevAdvice) nags.push(seed + '/' + d + ': ' + r.advice);
+        prevWx = wx; prevAdvice = r.advice;
+        Sim.nextDay();
+      }
+    }
+    const share = (a) => a.out / Math.max(1, a.days), when = (a) => a.t / Math.max(1, a.days);
+    ok(after.days >= 10 && share(after) <= share(other) + 0.15 && when(after) >= when(other) - 0.04,
+      'trust the cart' + (closeWet ? ', wet days closed early' : '') + ': a dry day after a wet one sells out about as often as other dry days: ' + JSON.stringify([after, other]));
+    console.log('trust the cart' + (closeWet ? ' (wet days closed early)' : '') + ': dry days after a wet day sold out ' + after.out + '/' + after.days + ', other dry days ' + other.out + '/' + other.days);
+  }
+  SS.off('soldout', onOut);
+  ok(!quiet.length, 'a happy day where 20%+ walked away on price says so: ' + quiet.slice(0, 3).join(' | '));
+  ok(!nags.length, 'the same recipe tip is not repeated the day after it was ignored: ' + nags.slice(0, 3).join(' | '));
+}
+
+/* A broke morning at a spot with rent: Grandma covers the rent too; cash that pays the rent but not a cup points at the free spot, and moving there refills the cart */
+{
+  disk.clear(); Sim.newGame(9);
+  let st = SS.state;
+  st.unlockedLocations.push('park'); st.location = 'park';
+  st.day = 4; st.phase = 'results'; st.cash = 0.4; st.stock = { lemons: 0, sugar: 0, ice: 0, cups: 0 }; st.lastResult = null;
+  Sim.nextDay();
+  st = SS.state;
+  let pi = Sim.prepInfo();
+  ok(Sim.rent() > 0 && pi.canStart && pi.maxCups >= 1, 'Grandma\'s loan pays the park\'s rent and a cup: ' + JSON.stringify([st.cash, st.cart, pi.reason]));
+  ITEMS.forEach((it) => Sim.setCart(it, 0));
+  st.cash = r2(Sim.rent() + 0.3);
+  pi = Sim.prepInfo();
+  ok(!pi.canStart && /Maple Street today, it is free/.test(pi.reason), 'rent leaves too little for a cup: prep says where it is free: ' + pi.reason);
+  ok(Sim.setLocation('street').ok && Sim.prepInfo().canStart, 'moving to Maple Street refills the cart so the stand can open: ' + JSON.stringify([st.cart, st.cash, Sim.prepInfo().reason]));
+}
+
+/* A morning saved before the filled cart (v1, empty cart) gets one on Continue, with Grandma's help when broke; a newer save keeps an empty cart as it was */
+{
+  for (const cash of [20, 0.5]) {
+    disk.clear();
+    disk.set(SS.SAVE_KEY, JSON.stringify({ v: 1, phase: 'prep', day: 2, cash, seed: 5, recipe: { lemons: 4, sugar: 4, ice: 2 }, cart: { lemons: 0, sugar: 0, ice: 0, cups: 0 }, tutorial: { done: false } }));
+    SS.state = null; Sim.init();
+    ok(Sim.continueGame() === true && Sim.cartCost() > 0 && Sim.prepInfo().canStart && SS.state.recipe.lemons === 4,
+      'an old morning with $' + cash + ' gets a cart that opens: ' + JSON.stringify([SS.state.cart, SS.state.cash, Sim.prepInfo().reason]));
+    checkState('old morning, $' + cash);
+  }
+  disk.clear(); Sim.newGame(5);
+  ITEMS.forEach((it) => Sim.setCart(it, 0));
+  Sim.save(); SS.state = null; Sim.init(); Sim.continueGame();
+  ok(Sim.cartCost() === 0, 'a save from this version keeps the empty cart the player chose: ' + JSON.stringify(SS.state.cart));
+}
+
 /* Frost Pack: no ice melts in the day, none spoils overnight */
 {
   for (const frost of [true, false]) {

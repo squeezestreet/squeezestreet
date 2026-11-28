@@ -172,7 +172,7 @@
     var ups = {};
     D.upgrades.forEach(function (u) { ups[u.id] = 0; });
     return {
-      v: 1, seed: seed | 0, phase: 'title', day: 1,
+      v: 2, seed: seed | 0, phase: 'title', day: 1,       // 2: saved mornings come with the filled cart
       cash: D.startCash, lifetimeEarnings: 0, lifetimeCups: 0, reputation: D.startReputation,
       location: D.locations[0].id, unlockedLocations: [D.locations[0].id],
       upgrades: ups, flavor: D.flavors[0].id, flavors: [D.flavors[0].id],
@@ -256,7 +256,8 @@
       advice: typeof raw.advice === 'string' ? raw.advice : '',
       hourly: hourly, spoiled: { lemons: Math.max(0, fin(sp.lemons, 0)), ice: Math.max(0, fin(sp.ice, 0)) },
       milestones: (Array.isArray(raw.milestones) ? raw.milestones : []).filter(function (id) { return !!D.byId(D.milestones, id); }),
-      bestDay: !!raw.bestDay, cashAfter: fin(raw.cashAfter, 0),
+      bestDay: !!raw.bestDay, cashAfter: fin(raw.cashAfter, 0), open: clamp(fin(raw.open, 1), 0, 1),
+      recipe: raw.recipe && typeof raw.recipe === 'object' ? { lemons: fin(raw.recipe.lemons, 0), sugar: fin(raw.recipe.sugar, 0), ice: fin(raw.recipe.ice, 0) } : null,
       standProfit: fin(raw.standProfit, fin(raw.profit, 0)), truck: cleanTruckDay(raw.truck), groceries: cleanBags(raw.groceries),
       loyalty: Math.max(0, fin(raw.loyalty, 0)), boostCost: Math.max(0, fin(raw.boostCost, 0)),
       boosts: (Array.isArray(raw.boosts) ? raw.boosts : []).filter(function (id, i, a) { return !!boostDef(id) && a.indexOf(id) === i; }),
@@ -412,7 +413,7 @@
         var h = raw.history[i];
         if (!h || typeof h !== 'object') continue;
         st.history.push({ day: fin(h.day, 0), profit: fin(h.profit, 0), revenue: fin(h.revenue, 0), cups: fin(h.cups, 0),
-          weather: D.weather[h.weather] ? h.weather : 'sunny', location: locDef(h.location).id });
+          weather: D.weather[h.weather] ? h.weather : 'sunny', location: locDef(h.location).id, want: Math.max(0, fin(h.want, fin(h.cups, 0))) });
       }
     }
     st.lastResult = cleanResult(raw.lastResult);
@@ -523,7 +524,7 @@
   function fuelBack(st) { var R = st.truck && st.truck.route; return R && R.left >= R.total ? fin(R.fuel, 0) : 0; }
   function grandma(st) {
     if (st.phase !== 'prep' || !st.market) return;
-    var need = loanNeed(st), have = st.cash + fuelBack(st);       // planned fuel still counts as yours, so cancelling a trip is no gift
+    var need = loanNeed(st), have = st.cash - rent() + fuelBack(st);       // planned fuel still counts as yours, so cancelling a trip is no gift
     if (need <= 0 || have >= need) return;
     var loan = Math.ceil(need - have) + 2;
     st.cash = r2(st.cash + loan);
@@ -558,14 +559,32 @@
     }
     trimCart(st, keep);
   }
+  function pull(id) { var w = D.weather[id] || D.weather.sunny; return w.traffic * w.thirst; }
+  /** Share of a full day's passers-by at this spot who come by `t` (0..1). */
+  function crowdShare(t, locId) {
+    var got = 0, all = 0, x, c;
+    for (x = 0.005; x < 1; x += 0.01) { c = curve(x, locId); all += c; if (x < t) got += c; }
+    return got / all;
+  }
+  /** Cups a day's crowd wanted, as if the stand had stayed open all day. */
+  function dayWant(r) {
+    var open = clamp(fin(r.open, 1), 0, 1);
+    return (r.cups + r.people.soldout + 0.5 * (r.people.wait + r.people.quit)) / (open >= 1 ? 1 : Math.max(0.25, crowdShare(open, r.location)));
+  }
   /** What the morning cart starts as: two packs of each on day 1, then about what yesterday's crowd wanted, scaled to today's forecast.
-   *  It leaves the rent of a truck the player has open in a town, unless the stand could then not open at all. */
+   *  After a wet day the last dry day here is the better guide. It leaves the rent of a truck the player has open in a town, unless the stand could then not open at all. */
   function prefillCart(st) {
-    var lr = st.lastResult, keep = truckRentDue(st), wanted = 0;
+    var lr = st.lastResult, keep = truckRentDue(st), wanted = 0, i, h;
     if (lr && lr.people && lr.weather) {
-      var pull = function (id) { var w = D.weather[id] || D.weather.sunny; return w.traffic * w.thirst; };
-      wanted = Math.max(12, (lr.cups + lr.people.soldout + 0.5 * (lr.people.wait + lr.people.quit)) * 1.2 *
-        clamp(pull(st.forecast.type) / pull(lr.weather.type), 0.45, 2.2));   // a washed-out yesterday still leaves a sensible order for a sunny today
+      var scale = function (id) { return clamp(pull(st.forecast.type) / pull(id), 0.45, 2.2); };    // a guess from a washed-out day stays sensible
+      wanted = dayWant(lr) * scale(lr.weather.type);
+      if (pull(lr.weather.type) < 0.5) {
+        for (i = st.history.length - 1; i >= 0; i--) {
+          h = st.history[i];
+          if (h.location === st.location && pull(h.weather) >= 0.5) { wanted = Math.max(wanted, h.want * scale(h.weather)); break; }
+        }
+      }
+      wanted = Math.max(12, wanted * 1.2);
     }
     function fill(k) { if (wanted) fillCart(st, wanted, k); else { ITEMS.forEach(function (it) { st.cart[it] = 2; }); trimCart(st, k); } }
     fill(keep);
@@ -581,13 +600,15 @@
     return st.cart;
   }
   /** After spending in the morning: keep the cart affordable and never leave the player stuck. */
-  function afterPrepSpend(st) {
+  function afterPrepSpend(st, moved) {
     if (st.phase !== 'prep') return;
-    if (trimCart(st)) {
+    var trimmed = trimCart(st);
+    if (trimmed) {
       emit('cart', {});
       toast('Your cart was trimmed to fit what you have left.', 'info', 'coin');
     }
     grandma(st);
+    if ((trimmed || moved) && cupsFrom(st, stockAfter(st)).cups < 1) { prefillCart(st); emit('cart', {}); }    // trimming or a new spot's rent can leave no whole cup
   }
 
   function startPrep() {
@@ -651,9 +672,12 @@
     if (st.cash + 1e-9 < loc.rent + cost) return { ok: false, reason: 'Your cart costs more than you have. Take something out.' };
     var can = cupsFrom(st, stockAfter(st));
     if (can.cups < 1) {
-      var name = D.items[can.limiting].name.toLowerCase();
-      return { ok: false, reason: 'You do not have enough ' + name + ' for a single cup. Add a pack of ' + name + ' to your cart.' +
-        (fuelBack(st) > 0 ? ' Cancelling the truck\'s trip gives its fuel back.' : '') };
+      var name = D.items[can.limiting].name.toLowerCase(), per = perCup(st), cup = 0, fuel = fuelBack(st) > 0 ? ' Cancelling the truck\'s trip gives its fuel back.' : '';
+      ITEMS.forEach(function (it) { if (st.stock[it] + 1e-9 < per[it]) cup += Math.ceil((per[it] - st.stock[it]) / D.items[it].pack - 1e-9) * st.market[it]; });
+      if (loc.rent > 0 && st.cash - loc.rent + 1e-9 < cup) {
+        return { ok: false, reason: 'After the ' + money(loc.rent) + ' rent at ' + loc.name + ', you cannot buy enough for a single cup. Set up on ' + D.locations[0].name + ' today, it is free.' + fuel };
+      }
+      return { ok: false, reason: 'You do not have enough ' + name + ' for a single cup. Add a pack of ' + name + ' to your cart.' + fuel };
     }
     return { ok: true, reason: '' };
   }
@@ -1434,8 +1458,13 @@
         if (res.cups < 1 && m.pricey > 0) return 'Nobody would pay ' + money(price) + ': drop the price and people will stop.';
         return loc.name + ' was quiet today: ring the bell, put up a sign, or try a busier spot.';
     }
-    if (tweak) return 'Customers loved it: to make it perfect, ' + tweak + '.';
-    return 'Customers loved it: keep the recipe, and see if they will pay a little more than ' + money(price) + '.';
+    // up to about half walking away on price still earns the most, so the red $$ get explained, not "fixed"
+    var walked = m.pricey > 0 && m.pricey >= 0.2 * (rt.served + m.pricey), prev = st.lastResult;
+    var fair = SS.fmtInt(m.pricey) + (m.pricey === 1 ? ' person' : ' people') + ' walked away at ' + money(price) + ', but most still paid, so your price is about right.';
+    var ignored = tweak && prev && prev.recipe && prev.advice.indexOf(tweak) >= 0 && prev.recipe.lemons === st.recipe.lemons && prev.recipe.sugar === st.recipe.sugar;
+    if (tweak && !ignored) return walked ? fair + ' To make it perfect, ' + tweak + '.' : 'Customers loved it: to make it perfect, ' + tweak + '.';
+    if (walked) return 'Customers loved it. ' + fair;
+    return 'Customers loved it: ' + (ignored ? '' : 'keep the recipe, and ') + 'see if they will pay a little more than ' + money(price) + '.';
   }
 
   function pickReviews(top) {
@@ -1494,7 +1523,7 @@
       repBefore: rt.repBefore, repAfter: st.reputation,
       reviews: pickReviews(top), topFeedback: top, advice: '',
       hourly: td.hourly.slice(), spoiled: spoilage(st), milestones: [],
-      bestDay: st.stats.days > 0 && standProfit > 0 && standProfit > st.stats.bestProfit, cashAfter: 0,
+      bestDay: st.stats.days > 0 && standProfit > 0 && standProfit > st.stats.bestProfit, cashAfter: 0, open: r2(td.t), recipe: { lemons: st.recipe.lemons, sugar: st.recipe.sugar, ice: st.recipe.ice },
       standProfit: standProfit, truck: truckRes, groceries: bags,
       loyalty: loyalty, boostCost: boostCost, boosts: st.boosts.slice(), regulars: rt.regRows
     };
@@ -1511,7 +1540,7 @@
     res.milestones = pendingMilestones.concat(done.map(function (x) { return x.id; }));
     pendingMilestones = [];
     res.cashAfter = st.cash;
-    st.history.push({ day: st.day, profit: profit, revenue: revenue, cups: td.sold, weather: st.weather.type, location: st.location });
+    st.history.push({ day: st.day, profit: profit, revenue: revenue, cups: td.sold, weather: st.weather.type, location: st.location, want: r2(dayWant(res)) });
     if (st.history.length > 30) st.history.splice(0, st.history.length - 30);
     st.lastResult = res;
     st.today = null;
@@ -1638,7 +1667,7 @@
     if (st.location !== id) {
       st.location = id;
       emit('location:set', { id: id });
-      afterPrepSpend(st);
+      afterPrepSpend(st, true);
       persist(false);
     }
     return { ok: true, reason: '' };
@@ -1745,9 +1774,9 @@
       var why = boostUseless(o.id, st);
       if (why) return why;
     } else if (st.flavors.indexOf(o.id) >= 0) return 'You already have ' + flavorDef(o.id).name + '.';
-    var cost = dealCost(st, o), keep = st.phase === 'prep' ? loanNeed(st) : 0;
+    var cost = dealCost(st, o), keep = st.phase === 'prep' && loanNeed(st) > 0 ? loanNeed(st) + rent() : 0;   // what Grandma would otherwise make up
     if (st.cash + 1e-9 < cost) return 'You need ' + money(cost - st.cash) + ' more for that.';
-    return st.cash - cost + 1e-9 < keep ? 'Keep ' + money(keep) + ' for supplies first. You would have ' + money(st.cash - cost) + ' left.' : '';
+    return st.cash - cost + 1e-9 < keep ? 'Keep ' + money(keep) + ' for supplies' + (rent() > 0 ? ' and rent' : '') + ' first. You would have ' + money(st.cash - cost) + ' left.' : '';
   }
   function dexLine(st) {
     var left = 0, lim = null, pool;
@@ -2116,7 +2145,10 @@
       st.event = m.event && m.event.known ? m.event : null;
       if (st.phase === 'prep') st.weather = { type: m.forecast.type, temp: m.forecast.temp };
     }
-    if (st.phase === 'prep') { trimCart(st); rollDealer(st); }     // older saves have no dealer yet
+    if (st.phase === 'prep') {
+      if (!(raw.v >= 2) && cartCost() === 0) { var cash0 = st.cash; prefillCart(st); grandma(st); if (st.cash > cash0) prefillCart(st); }    // a morning saved before the filled cart gets one; a newer empty cart was the player's choice
+      trimCart(st); rollDealer(st);       // older saves have no dealer yet
+    }
     emit('phase', { from: from, to: st.phase });
     return true;
   }
