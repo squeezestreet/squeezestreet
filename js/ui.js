@@ -423,9 +423,13 @@
       bar.sold.el.style.color = fl ? fl.color : '';
     }
 
-    // a rainy or stormy day can be cut short once it is well under way and nobody is waiting (not at t = 1: it is closing already)
-    var wx = s.weather && s.weather.type, wet = (wx === 'rainy' || wx === 'storm') && t > 0.4 && t < 1 && !(td.queue && td.queue.length);
-    var out = td.soldOut || (wet ? wx : ''), mode = td.soldOut ? 2 : wet ? 3 : brewing && dv.brewLong ? 1 : 0;
+    // a rainy or stormy day can be cut short once it is well under way and nobody is waiting (not at t = 1: it is closing already).
+    // Once offered it stays for the day, so someone joining the line can't pull it out from under a tap.
+    var wx = s.weather && s.weather.type;
+    dv.wet = dv.wet || ((wx === 'rainy' || wx === 'storm') && t > 0.4 && !(td.queue && td.queue.length));
+    var wet = dv.wet && t < 1;
+    // (the mixing hint waits while the stand coach tip says the same thing)
+    var out = td.soldOut || (wet ? wx : ''), mode = td.soldOut ? 2 : wet ? 3 : brewing && dv.brewLong && !tutOn('stand') ? 1 : 0;
     if (dv.fm !== mode || dv.out !== out) setFloat(mode, out);
   }
 
@@ -844,15 +848,17 @@
   /* ------------------------------------------------------------------ *
    * Coach tips for a first-time player
    * ------------------------------------------------------------------ */
-  /* One tip before day 1, two action prompts while it runs, and two more on the day-2 morning (prep2), then the lesson is over.
-   * act: no Next button; it goes when the player does the thing (see init), taps the bubble, or after ms. The clock keeps running. */
+  /* One tip before day 1, three action prompts while it runs, and two more on the day-2 morning (prep2), then the lesson is over.
+   * act: no Next button; it goes when the player does the thing (see init), taps the bubble, or after ms. The clock keeps running.
+   * stand and coin wait until there is something to tap (tutReady); whichever is ready first goes first. */
   var TIPS = {
     prep: [
       { at: 'open', text: 'Your stand is stocked. Open up and watch the street come to life.' }
     ],
     day: [
-      { at: 'bell', act: true, text: 'Ring the bell to call people over.' },
-      { at: 'stand', act: true, ms: 6000, text: 'Tap the stand to squeeze faster. Tap coins for tips.' }
+      { at: 'bell', act: true, ms: 8000, text: 'Ring the bell to call people over.' },
+      { at: 'stand', act: true, text: 'Tap the stand to squeeze faster.' },
+      { at: 'coin', act: true, ms: 8000, text: 'Tap coins for tips.' }
     ],
     prep2: [
       { at: 'market', text: 'We filled your cart from yesterday\'s sales. Change anything you like.' },
@@ -862,7 +868,7 @@
   var DEX_TIP = [
     { at: 'deals', once: 'dex', text: 'This is Dex. He turns up some mornings with boosts that last one day, and sometimes a limited-edition flavor you can\'t get anywhere else.' }
   ];
-  var coach = { phase: '', steps: null, i: 0, tries: 0, timer: 0, el: null, ring: null, node: null, bw: 0, bh: 0, side: '', x: 0, y: 0, ax: 0, ay: 0, l: 0, t: 0, w: 0, h: 0 };
+  var coach = { phase: '', steps: null, i: 0, tries: 0, timer: 0, el: null, ring: null, node: null, tip: null, bw: 0, bh: 0, side: '', x: 0, y: 0, ax: 0, ay: 0, l: 0, t: 0, w: 0, h: 0 };
 
   function tutDrop() {
     if (coach.el) coach.el.remove();
@@ -902,13 +908,20 @@
       return;
     }
     tutClear();
-    coach.phase = ph; coach.steps = steps; coach.i = 0; coach.tries = 0;
+    coach.phase = ph; coach.steps = steps.slice(); coach.i = 0; coach.tries = 0;     // a copy: tutStep may reorder it
     coach.timer = setTimeout(tutStep, ms);
   }
   function tutAnchor(name) {
-    if (name === 'stand') return SS.view && SS.view.w > 1 && phase === 'day' ? 'stand' : null;
+    if (name === 'stand' || name === 'coin') return SS.view && SS.view.w > 1 && phase === 'day' ? name : null;
     var el = document.querySelector('[data-tut="' + name + '"]');
     return el && el.getClientRects().length ? el : null;
+  }
+  /** a batch mixing for the stand tip, a coin on the ground for the coin tip */
+  function tutReady(at) {
+    var td = SS.state && SS.state.today;
+    if (at === 'stand') return !!(td && td.pitcher && td.pitcher.brew != null);
+    if (at === 'coin') return !!(td && td.tips && td.tips.length);
+    return true;
   }
   function tutNext() { tutMarkOnce(); coach.i++; coach.tries = 0; tutStep(); }
   function tutStep() {
@@ -920,6 +933,12 @@
       if (SS.state && SS.state.day > 1) tutFinish();
       return;
     }
+    if (!tutReady(step.at)) {                                // nothing to tap yet: a later tip that has goes first, else wait (init wakes us)
+      for (var j = coach.i + 1; j < steps.length && !tutReady(steps[j].at); j++);
+      if (j === steps.length) return;
+      step = steps.splice(j, 1)[0];
+      steps.splice(coach.i, 0, step);
+    }
     var node = tutAnchor(step.at);
     if (!node) {                                             // anchors can show up late: look again, then move on
       if (++coach.tries > 18) { coach.tries = 0; coach.i++; }
@@ -927,7 +946,8 @@
       return;
     }
     coach.tries = 0;
-    if (node !== 'stand') {                                  // bring it into view inside its own scroller only
+    coach.tip = node === 'coin' ? SS.state.today.tips[SS.state.today.tips.length - 1] : null;     // the newest lasts longest
+    if (typeof node !== 'string') {                          // bring it into view inside its own scroller only
       var sc = node.closest('.sheet-body, .modal-body');
       if (sc) {
         var a = node.getBoundingClientRect(), box = sc.getBoundingClientRect();
@@ -954,16 +974,27 @@
     if (R.coach.hidden !== hide) R.coach.hidden = hide;
     if (hide || !coach.el) return;
     var node = coach.node, W = R.coach.clientWidth, H = R.coach.clientHeight, l, t, w, ht, bar = null;
-    if (node === 'stand') {
-      var v = SS.view, G = SS.W;
+    if (node === 'stand' || node === 'coin') {
+      var v = SS.view, G = SS.W, tips = SS.state && SS.state.today && SS.state.today.tips, c = coach.tip;
       if (!v || phase !== 'day') { tutNext(); return; }
-      w = G.STAND_W * v.scale * 1.15; ht = 150 * v.scale;
-      l = v.toX(G.STAND_X) - w / 2; t = v.laneY(G.STAND_LANE) - ht;
+      if (node === 'coin') {
+        if (!tips || tips.indexOf(c) < 0) { tutNext(); return; }      // picked up, or it ran out
+        var cs = v.laneScale(c.lane);
+        w = 24 * cs; ht = 32 * cs; l = v.toX(c.x) - w / 2; t = v.laneY(c.lane) - 30 * cs;
+      } else {
+        w = G.STAND_W * v.scale * 1.15; ht = 150 * v.scale;
+        l = v.toX(G.STAND_X) - w / 2; t = v.laneY(G.STAND_LANE) - ht;
+      }
     } else {
       if (!node.isConnected || !node.getClientRects().length) { tutStep(); return; }
       var r = node.getBoundingClientRect(), o = R.coach.getBoundingClientRect(), f = node.closest('.prep-foot, .res-foot, .daybar-panel');
       var lift = f && f.classList.contains('daybar-panel') ? 60 : 0;      // the day bar's hint pill and goal tab sit above it
-      l = r.left - o.left; t = r.top - o.top; w = r.width; ht = r.height;
+      var sc = node.closest('.sheet-body, .modal-body'), top = r.top, bot = r.bottom;
+      if (sc) {                                              // ring only the part its scroller shows, never over the footer under it
+        var sr = sc.getBoundingClientRect();
+        top = Math.max(top, sr.top + 6); bot = Math.max(top, Math.min(bot, sr.bottom - 6));
+      }
+      l = r.left - o.left; t = top - o.top; w = r.width; ht = bot - top;
       if (f) { f = f.getBoundingClientRect(); bar = { l: f.left - o.left, t: f.top - o.top - lift, w: f.width, h: f.height + lift }; }
     }
     if (!coach.bw) { coach.bw = coach.el.offsetWidth; coach.bh = coach.el.offsetHeight; }
@@ -973,6 +1004,9 @@
     var k = bar || { l: l, t: t, w: w, h: ht };
     // a tip over the running street goes above its anchor when it can, clear of the stand and the queue beside it
     if (!(step && step.act) && k.w < W * 0.6 && k.l > W * 0.4 && k.l - gap - m >= bw) side = 'left';
+    // a prompt while the day runs (bar a stand tip, which sits above the stand) goes in the sky under the HUD: right
+    // above the day bar or a coin is the sidewalk and the queue
+    else if (step && step.act && node !== 'stand') side = 'over';
     else if (k.t - top0 - gap >= bh) side = 'top';
     else if (H - (k.t + k.h) - gap - m >= bh) side = 'bottom';
     else if (k.l - gap - m >= bw) side = 'left';
@@ -984,6 +1018,11 @@
     } else {
       x = clamp(l + w / 2 - bw / 2, m, Math.max(m, W - bw - m));
       y = side === 'top' ? k.t - gap - bh : side === 'bottom' ? k.t + k.h + gap : top0 + 4;
+      // news banners share that sky and draw on top: sit under one, unless that would put the tip back over the street
+      if (side === 'over' && step && step.act && R.banner.firstElementChild && SS.view) {
+        var under = R.banner.getBoundingClientRect().bottom - R.coach.getBoundingClientRect().top + 8;
+        if (under + bh <= SS.view.laneY(SS.W.STAND_LANE) - 150 * SS.view.scale) y = Math.max(y, under);
+      }
     }
     x = Math.round(x); y = Math.round(y); l = Math.round(l); t = Math.round(t); w = Math.round(w); ht = Math.round(ht);
     var ax = Math.round(clamp(l + w / 2 - x, 22, bw - 22)), ay = Math.round(clamp(cy - y, 22, bh - 22));
@@ -1158,7 +1197,11 @@
     });
     SS.on('bell', function () { if (tutOn('bell')) tutNext(); });
     SS.on('brew:tap', function () { if (tutOn('stand')) tutNext(); });
-    SS.on('tip:collect', function (p) { if (tutOn('stand') && !(p && p.auto)) tutNext(); });
+    SS.on('brew:done', function () { if (coach.el && tutOn('stand')) tutNext(); });       // mixed: nothing left to squeeze
+    SS.on('tip:collect', function (p) { if (tutOn('coin') && !(p && p.auto)) tutNext(); });
+    ['brew:start', 'tip:drop'].forEach(function (e) {             // a stand or coin tip waiting for this can show now
+      SS.on(e, function () { if (phase === 'day' && coach.steps && !coach.el) tutStep(); });
+    });
     SS.on('sale', refreshGoal);
 
     document.addEventListener('keydown', onKey, true);
