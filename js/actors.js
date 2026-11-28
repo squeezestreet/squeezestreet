@@ -442,7 +442,8 @@
      scratch canvas and laid down at once: alpha on each part would show the arms and legs through one another. */
   var ghost = null;
   function drawFront(ctx, view, env, c, col) {
-    var a = c.state === 'walk' || c.state === 'leave' ? 0.55 + 0.45 * SS.clamp((Math.abs(c.x - W.STAND_X) - 100) / 40, 0, 1) : 1;
+    // by place, not state: the line's lane stays solid, and nobody blinks as they turn to the line or walk off with a drink
+    var a = 1 - 0.45 * SS.clamp((c.lane - W.QUEUE_LANE) / (W.PASS_LANES[1][0] - W.QUEUE_LANE), 0, 1) * (1 - SS.clamp((Math.abs(c.x - W.STAND_X) - 100) / 40, 0, 1));
     if (a >= 1 || !ctx.getTransform) { drawCustomer(ctx, view, env, c, col); return; }
     var cv = ctx.canvas, m = ctx.getTransform(), s = view.laneScale(c.lane), x = view.toX(c.x), y = view.laneY(c.lane);
     var l = Math.max(0, Math.floor(m.a * (x - 70 * s) + m.e)), t = Math.max(0, Math.floor(m.d * (y - 200 * s) + m.f));

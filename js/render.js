@@ -22,7 +22,7 @@
   });
   var NIGHT_SPAN = 1.6;                    // dayT wraps here
   var target = { scale: 1, camX: W.STAND_X, groundY: 0, cx: 0 }, snapped = false;
-  var inset = { top: 0, right: 0, bottom: 0, left: 0, pill: 1e9 }, insetAt = -1;   // pill: y of the day bar's hint pill top
+  var inset = { top: 0, right: 0, bottom: 0, left: 0, pill: 1e9 }, insetAt = -1, pillGap = 56;   // pill: y of the day bar's hint pill top
   var warned = {};
 
   function safe(name, fn) {
@@ -55,10 +55,13 @@
     }
     var bar = document.getElementById('daybar');
     if (bar && !bar.hidden) {
-      var bt = bar.getBoundingClientRect().top;
+      var bt = bar.getBoundingClientRect().top, f = bar.querySelector('.daybar-float');
       bottom = Math.max(bottom, view.h - bt + 4);
-      pill = bt - 56;                                     // the hint pill floats up to 56px above the bar; kept free while hidden too, so the street does not bob
-    }
+      // the hint pill floats up to 56px above the bar, ~73 with its Close up early button: the most it has needed today
+      // stays free while it is hidden too, so the street does not bob
+      if (f && !f.hidden) pillGap = Math.max(pillGap, bt - f.getBoundingClientRect().top + 4);
+      pill = bt - pillGap;
+    } else pillGap = 56;
     inset.pill = pill;
     inset.top = top; inset.right = right; inset.bottom = Math.min(bottom, view.h * 0.7); inset.left = 0;
   }
